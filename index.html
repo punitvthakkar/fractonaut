@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description"
+        content="Explore the infinite beauty of the Mandelbrot set with an immersive, interactive fractal viewer">
+    <title>Fractonaut</title>
+
+    <!-- PWA & Icons -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" href="256.png">
+    <link rel="apple-touch-icon" href="256.png">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <link rel="stylesheet" href="style.css?v=2">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Ambient background layer -->
+    <div class="ambient-layer"></div>
+
+    <!-- Main canvas - full viewport -->
+    <canvas id="glCanvas"></canvas>
+    <div class="canvas-vignette"></div>
+
+    <!-- Top Right Status & Save Trigger -->
+    <div class="status-container" id="statusTrigger">
+        <div class="status-row">
+            <span class="status-label">X</span>
+            <span class="status-value" id="coordX">0.000000</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Y</span>
+            <span class="status-value" id="coordY">0.000000</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Z</span>
+            <span class="status-value" id="coordZ">1.0</span>
+        </div>
+        <div class="status-hint">TAP TO SAVE</div>
+    </div>
+
+    <!-- Central Circle Control -->
+    <div class="circle-control-container">
+        <div class="circle-control" id="circleControl">
+            <div class="circle-inner">
+                <div class="circle-icon"></div>
+            </div>
+            <div class="control-guide guide-up">ZOOM IN</div>
+            <div class="control-guide guide-down">ZOOM OUT</div>
+            <div class="control-guide guide-left">LESS DETAIL</div>
+            <div class="control-guide guide-right">MORE DETAIL</div>
+        </div>
+    </div>
+
+    <!-- Slide-in control panel (Desktop: from right, Mobile: from bottom) -->
+    <div class="control-panel" id="controlPanel">
+        <!-- Panel header with close button -->
+        <div class="panel-header">
+            <div class="panel-title-group">
+                <h1>Mandelbrot Explorer</h1>
+                <p class="subtitle">Journey into infinite complexity</p>
+            </div>
+            <button class="panel-close-btn" id="panelClose" aria-label="Close panel">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Mobile drag handle -->
+        <div class="mobile-drag-handle"></div>
+
+        <!-- Control sections -->
+        <div class="panel-content">
+            <!-- Detail level -->
+            <div class="control-section">
+                <label class="section-label">
+                    <span>Detail Level</span>
+                    <span class="value-display" id="iterValue">500</span>
+                </label>
+                <input type="range" id="iterations" class="styled-range" min="100" max="2000" value="500" step="50">
+                <small class="hint-text">Higher values reveal finer structures</small>
+            </div>
+
+            <!-- Color palette -->
+            <div class="control-section">
+                <label class="section-label">Color Palette</label>
+                <div class="palette-grid">
+                    <button class="palette-card active" data-palette="0" aria-label="Ocean Depth">
+                        <div class="palette-preview palette-0"></div>
+                        <span class="palette-name">Ocean</span>
+                    </button>
+                    <button class="palette-card" data-palette="1" aria-label="Magma">
+                        <div class="palette-preview palette-1"></div>
+                        <span class="palette-name">Magma</span>
+                    </button>
+                    <button class="palette-card" data-palette="2" aria-label="Aurora">
+                        <div class="palette-preview palette-2"></div>
+                        <span class="palette-name">Aurora</span>
+                    </button>
+                    <button class="palette-card" data-palette="3" aria-label="Amber">
+                        <div class="palette-preview palette-3"></div>
+                        <span class="palette-name">Amber</span>
+                    </button>
+                    <button class="palette-card" data-palette="4" aria-label="Extreme">
+                        <div class="palette-preview palette-4"></div>
+                        <span class="palette-name">Extreme</span>
+                    </button>
+                    <button class="palette-card" data-palette="5" aria-label="Neon">
+                        <div class="palette-preview palette-5"></div>
+                        <span class="palette-name">Neon</span>
+                    </button>
+                    <button class="palette-card" data-palette="6" aria-label="Golden">
+                        <div class="palette-preview palette-6"></div>
+                        <span class="palette-name">Golden</span>
+                    </button>
+                    <button class="palette-card" data-palette="7" aria-label="Cyber">
+                        <div class="palette-preview palette-7"></div>
+                        <span class="palette-name">Cyber</span>
+                    </button>
+                    <button class="palette-card" data-palette="8" aria-label="Ice">
+                        <div class="palette-preview palette-8"></div>
+                        <span class="palette-name">Ice</span>
+                    </button>
+                    <button class="palette-card" data-palette="9" aria-label="Forest">
+                        <div class="palette-preview palette-9"></div>
+                        <span class="palette-name">Forest</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Explore Section -->
+            <div class="control-section">
+                <label class="section-label">Explore</label>
+
+                <div class="explore-tabs">
+                    <button class="explore-tab active" data-tab="scenes">Scenes</button>
+                    <button class="explore-tab" data-tab="fractals">Fractals</button>
+                </div>
+
+                <!-- Tab: Scenes -->
+                <div id="tabScenes" class="tab-content active">
+                    <div class="duration-control-row">
+                        <label for="journeyDuration">Fly Duration (s):</label>
+                        <input type="number" id="journeyDuration" class="styled-input" value="30" min="1" max="60">
+                    </div>
+                    <div id="visualCatalogue" class="catalogue-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Tab: Fractals -->
+                <div id="tabFractals" class="tab-content">
+                    <div class="fractal-grid">
+                        <button class="fractal-card active" data-type="0">
+                            <div class="fractal-preview mandelbrot-preview"></div>
+                            <div class="fractal-info">
+                                <span class="fractal-name">Mandelbrot</span>
+                                <span class="fractal-desc">The classic set</span>
+                            </div>
+                        </button>
+                        <button class="fractal-card" data-type="1">
+                            <div class="fractal-preview julia-preview"></div>
+                            <div class="fractal-info">
+                                <span class="fractal-name">Julia</span>
+                                <span class="fractal-desc">Self-similar spirals</span>
+                            </div>
+                        </button>
+                        <button class="fractal-card" data-type="2">
+                            <div class="fractal-preview sierpinski-preview"></div>
+                            <div class="fractal-info">
+                                <span class="fractal-name">Sierpinski</span>
+                                <span class="fractal-desc">Infinite triangles</span>
+                            </div>
+                        </button>
+
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- Quick actions -->
+            <div class="control-section quick-actions">
+                <div class="action-grid">
+                    <button id="resetBtn" class="action-btn primary" title="Reset to home view">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                        </svg>
+                        <span>Reset</span>
+                    </button>
+                    <button id="screenshotBtn" class="action-btn secondary" title="Save current view">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z">
+                            </path>
+                            <circle cx="12" cy="13" r="4"></circle>
+                        </svg>
+                        <span>Save</span>
+                    </button>
+                    <button id="fullscreenBtn" class="action-btn secondary" title="Toggle fullscreen">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path
+                                d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3">
+                            </path>
+                        </svg>
+                        <span id="fullscreenLabel">Full</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- Location info overlay (top-center) -->
+    <div class="location-info" id="locationInfo">
+        <h3 id="locationTitle">Home View</h3>
+        <p id="locationDescription">The complete Mandelbrot set in its iconic form</p>
+    </div>
+
+    <!-- Gesture tutorial overlay (mobile first-time) -->
+    <div class="gesture-tutorial" id="gestureTutorial">
+        <button class="tutorial-close" id="tutorialClose" aria-label="Close tutorial">×</button>
+        <div class="tutorial-content">
+            <h2 id="tutorialTitle">Welcome!</h2>
+            <p id="tutorialText">Drag to explore, pinch to zoom into infinite detail.</p>
+            <div class="tutorial-gestures">
+                <div class="gesture-hint">
+                    <div class="gesture-icon">👆</div>
+                    <span>Tap to explore</span>
+                </div>
+                <div class="gesture-hint">
+                    <div class="gesture-icon">🤏</div>
+                    <span>Pinch to zoom</span>
+                </div>
+                <div class="gesture-hint">
+                    <div class="gesture-icon">👇</div>
+                    <span>Double-tap to focus</span>
+                </div>
+            </div>
+            <button class="tutorial-btn" id="tutorialNext">Get Started</button>
+        </div>
+    </div>
+
+
+
+    <!-- Save Location Modal -->
+    <div id="saveModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Save Scene</h3>
+            <p>Name your discovery and set a journey duration.</p>
+            <div class="input-group">
+                <label>Name</label>
+                <input type="text" id="locationNameInput" placeholder="e.g., Cosmic Spiral" maxlength="30">
+            </div>
+            <div class="input-group">
+                <label>Duration (seconds)</label>
+                <input type="number" id="locationDurationInput" value="30" min="5" max="300">
+            </div>
+            <div class="modal-actions">
+                <button id="cancelSaveBtn" class="btn-secondary">Cancel</button>
+                <button id="confirmSaveBtn" class="btn-primary">Save & Fly</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PWA Install Prompt (Mobile) -->
+    <div id="pwaInstallPrompt" class="pwa-prompt hidden">
+        <div class="pwa-content">
+            <img src="256.png" alt="Fractonaut Logo">
+            <div class="pwa-text">
+                <h4>Install Fractonaut</h4>
+                <p>Add to Home Screen for the best experience.</p>
+            </div>
+            <button id="pwaInstallBtn">Install</button>
+            <button id="pwaCloseBtn" class="close-icon">×</button>
+        </div>
+    </div>
+
+    <script src="script.js?v=2"></script>
+</body>
+
+</html>
