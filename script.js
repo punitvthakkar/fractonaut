@@ -766,6 +766,10 @@ function renderCatalogue() {
     });
 }
 
+function getShareText(locationName, shareUrl) {
+    return `Take me on a trip to ${locationName} on Fractonaut\n\n${shareUrl}`;
+}
+
 function shareLocation(loc) {
     const zoom = loc.zoom || (3.0 / state.zoomSize);
     const params = new URLSearchParams({
@@ -779,16 +783,17 @@ function shareLocation(loc) {
         d: loc.duration || 30
     });
     const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+    const shareText = getShareText(loc.title, shareUrl);
 
     // Try Web Share API first (mobile)
     if (navigator.share) {
         navigator.share({
             title: loc.title,
-            text: `Check out this fractal location: ${loc.title}`,
+            text: shareText,
             url: shareUrl
         }).catch(() => {
             // Fallback to clipboard
-            navigator.clipboard.writeText(shareUrl).then(() => {
+            navigator.clipboard.writeText(shareText).then(() => {
                 showToast('Link copied to clipboard!');
             }).catch(() => {
                 showToast('Could not share');
@@ -796,7 +801,7 @@ function shareLocation(loc) {
         });
     } else {
         // Fallback to clipboard
-        navigator.clipboard.writeText(shareUrl).then(() => {
+        navigator.clipboard.writeText(shareText).then(() => {
             showToast('Link copied to clipboard!');
         }).catch(() => {
             showToast('Could not copy link');
@@ -917,6 +922,8 @@ function showShareButtonPopup(loc) {
         d: loc.duration || 30
     });
     const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+    const shareText = getShareText(loc.title, shareUrl);
+    const screenCtx = getScreenContext();
 
     // Clear any existing handlers
     shareBtn.onclick = null;
@@ -928,25 +935,32 @@ function showShareButtonPopup(loc) {
 
     // Handle share button click
     shareBtn.onclick = () => {
-        navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast('Link copied to clipboard!');
-            popup.classList.remove('show');
-        }).catch(() => {
-            // Fallback: try Web Share API
-            if (navigator.share) {
-                navigator.share({
-                    title: loc.title,
-                    text: `Check out this fractal location: ${loc.title}`,
-                    url: shareUrl
-                }).then(() => {
+        // Mobile: use Web Share API
+        if (screenCtx.isMobile && navigator.share) {
+            navigator.share({
+                title: loc.title,
+                text: shareText,
+                url: shareUrl
+            }).then(() => {
+                popup.classList.remove('show');
+            }).catch(() => {
+                // Fallback to clipboard if share is cancelled
+                navigator.clipboard.writeText(shareText).then(() => {
+                    showToast('Link copied to clipboard!');
                     popup.classList.remove('show');
                 }).catch(() => {
                     showToast('Could not share');
                 });
-            } else {
+            });
+        } else {
+            // Desktop: copy to clipboard
+            navigator.clipboard.writeText(shareText).then(() => {
+                showToast('Link copied to clipboard!');
+                popup.classList.remove('show');
+            }).catch(() => {
                 showToast('Could not copy link');
-            }
-        });
+            });
+        }
     };
 
     // Auto-hide after 10 seconds
@@ -1354,8 +1368,9 @@ function saveScene(name, duration) {
     // 3. Refresh Catalogue
     renderCatalogue();
 
-    // 4. Copy URL to Clipboard (silently, no toast)
-    navigator.clipboard.writeText(url).catch(() => {
+    // 4. Copy formatted text to Clipboard (silently, no toast)
+    const shareText = getShareText(name, url);
+    navigator.clipboard.writeText(shareText).catch(() => {
         // Silently fail if clipboard access is not available
     });
 
