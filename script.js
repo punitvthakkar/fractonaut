@@ -609,6 +609,7 @@ function drawScene(timestamp) {
 
     if (!state.isAnimating) {
         // Apply smooth zoom limit at 0.5x (zoomSize = 6.0)
+        // Only apply limit if not just finishing an animation (avoid jarring transitions)
         const maxZoomSize = 6.0;
         if (state.targetZoomSize > maxZoomSize) {
             // Smooth resistance with subtle bounce effect
@@ -621,9 +622,14 @@ function drawScene(timestamp) {
             state.targetZoomCenter.y = 0.0;
         }
         
+        // Smooth interpolation to target values
         state.zoomSize += (state.targetZoomSize - state.zoomSize) * lerpFactor;
         state.zoomCenter.x += (state.targetZoomCenter.x - state.zoomCenter.x) * lerpFactor;
         state.zoomCenter.y += (state.targetZoomCenter.y - state.zoomCenter.y) * lerpFactor;
+    } else {
+        // During animation, ensure zoomSize stays in sync with targetZoomSize
+        // This prevents any drift or conflicts between animation and drawScene
+        state.zoomSize = state.targetZoomSize;
     }
 
     resizeCanvasToDisplaySize(gl.canvas);
@@ -889,9 +895,20 @@ function startHypnoticJourney(loc) {
         if (t < 1.0) {
             requestAnimationFrame(animate);
         } else {
-            state.isAnimating = false;
-            // Show share button popup after flythrough completes
-            showShareButtonPopup(loc);
+            // Ensure final values are set exactly before ending animation
+            state.targetZoomSize = targetSize;
+            state.zoomSize = targetSize;
+            state.targetZoomCenter.x = loc.x;
+            state.targetZoomCenter.y = loc.y;
+            state.zoomCenter.x = loc.x;
+            state.zoomCenter.y = loc.y;
+            
+            // Use requestAnimationFrame to ensure drawScene processes final frame first
+            requestAnimationFrame(() => {
+                state.isAnimating = false;
+                // Show share button popup after flythrough completes
+                showShareButtonPopup(loc);
+            });
         }
     }
 
@@ -1663,8 +1680,8 @@ function hideTutorial() {
 document.getElementById('tutorialClose').addEventListener('click', hideTutorial);
 document.getElementById('tutorialNext').addEventListener('click', hideTutorial);
 
-// Show tutorial on first mobile visit
-if (!state.tutorialShown && getScreenContext().isMobile) {
+// Show tutorial on first visit (all devices)
+if (!state.tutorialShown) {
     setTimeout(showTutorial, 1500);
 }
 
