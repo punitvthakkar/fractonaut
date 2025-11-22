@@ -767,7 +767,7 @@ function renderCatalogue() {
 }
 
 function getShareText(locationName, shareUrl) {
-    return `Take me on a trip to ${locationName} on Fractonaut\n\n${shareUrl}`;
+    return `Let's go on a trip to ${locationName} on Fractonaut\n\n${shareUrl}`;
 }
 
 function shareLocation(loc) {
