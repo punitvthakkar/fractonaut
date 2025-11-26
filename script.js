@@ -634,7 +634,7 @@ let isVideoRendering = false; // Flag to pause main rendering during video expor
 
 // Rendering - Optimized for smoothness
 function drawScene(timestamp) {
-    // Skip main rendering during video export to save memory
+    // Skip main rendering during video export to free up memory and GPU
     if (isVideoRendering) {
         requestAnimationFrame(drawScene);
         return;
@@ -2557,15 +2557,6 @@ function initVideoSettingsModal() {
         });
     }
 
-    // Duration selection
-    durationOptions.forEach(opt => {
-        opt.addEventListener('click', () => {
-            durationOptions.forEach(o => o.classList.remove('selected'));
-            opt.classList.add('selected');
-            selectedSettings.duration = parseInt(opt.dataset.videoDuration);
-        });
-    });
-
     resolutionOptions.forEach(opt => {
         opt.addEventListener('click', () => {
             resolutionOptions.forEach(o => o.classList.remove('selected'));
@@ -2597,6 +2588,14 @@ function initVideoSettingsModal() {
         });
     });
 
+    durationOptions.forEach(opt => {
+        opt.addEventListener('click', () => {
+            durationOptions.forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            selectedSettings.duration = parseInt(opt.dataset.videoDuration);
+        });
+    });
+
     if (startBtn) {
         startBtn.addEventListener('click', () => {
             modal.classList.add('hidden');
@@ -2609,20 +2608,24 @@ async function renderVideoJourney(settings) {
     const { width, height, fps, duration } = settings;
     const totalFrames = Math.round(duration * fps);
 
-    // Save current state before pausing main render
+    // Save current state BEFORE pausing main render
+    // This captures the exact location where user pressed render
     const savedState = {
         zoomCenter: { x: state.zoomCenter.x, y: state.zoomCenter.y },
+        targetZoomCenter: { x: state.targetZoomCenter.x, y: state.targetZoomCenter.y },
         zoomSize: state.zoomSize,
+        targetZoomSize: state.targetZoomSize,
         maxIterations: state.maxIterations,
         paletteId: state.paletteId,
         fractalType: state.fractalType,
         juliaC: { x: state.juliaC.x, y: state.juliaC.y }
     };
 
-    // Pause main rendering to free up memory
+    // Pause main rendering to free up memory and GPU resources
     isVideoRendering = true;
     const glCanvas = document.getElementById('glCanvas');
     if (glCanvas) glCanvas.classList.add('rendering-paused');
+    document.body.classList.add('video-rendering-active');
 
     // Show loading overlay with dual progress bars
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
@@ -2665,23 +2668,27 @@ async function renderVideoJourney(settings) {
         updateVideoProgress(0, 'Waiting...');
     };
 
+    // Function to resume main rendering and restore state
     const resumeMainRendering = () => {
-        // Resume main rendering
-        isVideoRendering = false;
+        // Remove blur and rendering class
         if (glCanvas) glCanvas.classList.remove('rendering-paused');
+        document.body.classList.remove('video-rendering-active');
         
-        // Restore the saved state and trigger a re-render
+        // Restore the saved state - this puts user back exactly where they were
         state.zoomCenter.x = savedState.zoomCenter.x;
         state.zoomCenter.y = savedState.zoomCenter.y;
+        state.targetZoomCenter.x = savedState.targetZoomCenter.x;
+        state.targetZoomCenter.y = savedState.targetZoomCenter.y;
         state.zoomSize = savedState.zoomSize;
+        state.targetZoomSize = savedState.targetZoomSize;
         state.maxIterations = savedState.maxIterations;
         state.paletteId = savedState.paletteId;
         state.fractalType = savedState.fractalType;
         state.juliaC.x = savedState.juliaC.x;
         state.juliaC.y = savedState.juliaC.y;
         
-        // Force a re-render of the main canvas
-        requestAnimationFrame(drawScene);
+        // Resume main rendering
+        isVideoRendering = false;
     };
 
     try {
@@ -2907,7 +2914,7 @@ async function renderVideoJourney(settings) {
 
         if (loadingStatus) loadingStatus.textContent = 'Complete!';
         
-        // Cleanup WebGL context first to free memory
+        // Cleanup WebGL context FIRST to free memory
         try {
             const loseContext = offGl.getExtension('WEBGL_lose_context');
             if (loseContext) loseContext.loseContext();
@@ -2918,7 +2925,7 @@ async function renderVideoJourney(settings) {
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
             resetOverlay();
-            // Resume main rendering after cleanup
+            // Resume main rendering AFTER cleanup - this restores user to their exact location
             resumeMainRendering();
             showToast(`Video exported at ${width}×${height} ${fps}fps`);
         }, 1000);

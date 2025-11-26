@@ -1836,14 +1836,12 @@ input[type=range]::-webkit-slider-thumb:hover {
     grid-template-columns: repeat(2, 1fr);
 }
 
-/* Video duration grid - 3 columns */
+/* Video Duration Grid - 3 column */
 .video-duration-grid {
     grid-template-columns: repeat(3, 1fr);
 }
 
-/* Video option buttons (separate from image export resolution options) */
-.video-option,
-.video-fps-option,
+/* Video duration option buttons */
 .video-duration-option {
     padding: 16px 12px;
     background: rgba(0, 0, 0, 0.3);
@@ -1859,8 +1857,6 @@ input[type=range]::-webkit-slider-thumb:hover {
     font-family: inherit;
 }
 
-.video-option:hover,
-.video-fps-option:hover,
 .video-duration-option:hover {
     background: rgba(0, 255, 255, 0.1);
     border-color: rgba(0, 255, 255, 0.4);
@@ -1868,9 +1864,51 @@ input[type=range]::-webkit-slider-thumb:hover {
     transform: translateY(-2px);
 }
 
-.video-option.selected,
-.video-fps-option.selected,
 .video-duration-option.selected {
+    background: rgba(0, 255, 255, 0.2);
+    border-color: rgba(0, 255, 255, 0.6);
+    color: #00ffff;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+/* Canvas blur during video rendering */
+#glCanvas.rendering-paused {
+    filter: blur(20px);
+    transition: filter 0.5s ease;
+}
+
+/* Video rendering overlay background */
+.video-rendering-active .export-loading-overlay {
+    background: rgba(0, 0, 0, 0.85);
+}
+
+/* Video option buttons (separate from image export resolution options) */
+.video-option,
+.video-fps-option {
+    padding: 16px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+}
+
+.video-option:hover,
+.video-fps-option:hover {
+    background: rgba(0, 255, 255, 0.1);
+    border-color: rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    transform: translateY(-2px);
+}
+
+.video-option.selected,
+.video-fps-option.selected {
     background: rgba(0, 255, 255, 0.2);
     border-color: rgba(0, 255, 255, 0.6);
     color: #00ffff;
@@ -1938,33 +1976,6 @@ input[type=range]::-webkit-slider-thumb:hover {
     color: rgba(255, 255, 255, 0.6);
     margin: 0;
     font-style: italic;
-}
-
-/* Canvas blur during video rendering */
-#glCanvas.rendering-paused {
-    filter: blur(10px);
-    transition: filter 0.3s ease;
-}
-
-/* Video rendering backdrop */
-.video-rendering-backdrop {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
-    z-index: 999;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.video-rendering-backdrop.active {
-    opacity: 1;
-    pointer-events: auto;
 }
 
 @media (max-width: 480px) {
