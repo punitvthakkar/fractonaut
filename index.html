@@ -49,6 +49,14 @@
         </svg>
     </button>
 
+    <!-- Share Video Button -->
+    <button class="joystick-side-button share-video-button" id="shareVideoTrigger" aria-label="Share Video">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+        </svg>
+    </button>
+
     <!-- Hidden stats for internal use -->
     <div style="display: none;">
         <span id="coordX">0.000000</span>
@@ -299,6 +307,116 @@
             <div class="modal-actions">
                 <button id="cancelAddLocationBtn" class="btn-secondary">No</button>
                 <button id="confirmAddLocationBtn" class="btn-primary">Yes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Resolution Selection Modal -->
+    <div id="exportResolutionModal" class="modal hidden">
+        <div class="modal-content save-modal-content">
+            <h3>Select Export Resolution</h3>
+            <div class="input-group">
+                <label>Resolution</label>
+                <div class="resolution-grid">
+                    <button class="resolution-option" data-width="3840" data-height="2160">
+                        <span class="resolution-label">4K</span>
+                        <span class="resolution-detail">3840 × 2160</span>
+                    </button>
+                    <button class="resolution-option" data-width="7680" data-height="4320">
+                        <span class="resolution-label">8K</span>
+                        <span class="resolution-detail">7680 × 4320</span>
+                    </button>
+                    <button class="resolution-option" data-width="15360" data-height="8640">
+                        <span class="resolution-label">16K</span>
+                        <span class="resolution-detail">15360 × 8640</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="cancelExportBtn" class="btn-secondary">Cancel</button>
+                <button id="confirmExportBtn" class="btn-primary" disabled>Export</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Loading Overlay -->
+    <div id="exportLoadingOverlay" class="export-loading-overlay hidden">
+        <div class="export-loading-content">
+            <h3 id="exportLoadingTitle">Exporting Fractal</h3>
+            
+            <!-- Single progress bar for image export -->
+            <div id="singleProgressContainer" class="loading-bar-container">
+                <div class="loading-bar-track">
+                    <div class="loading-bar-fill" id="loadingBarFill"></div>
+                </div>
+                <div class="loading-percentage" id="loadingPercentage">0%</div>
+            </div>
+            
+            <!-- Dual progress bars for video export -->
+            <div id="dualProgressContainer" class="dual-progress-container hidden">
+                <p class="video-warning-text-small">⚠️ Please be patient! This process is intensive and may cause your device to heat up.</p>
+                
+                <div class="progress-section">
+                    <div class="progress-label">
+                        <span>Rendering Frames</span>
+                        <span id="frameProgressPercent">0%</span>
+                    </div>
+                    <div class="loading-bar-track">
+                        <div class="loading-bar-fill" id="frameProgressBar"></div>
+                    </div>
+                    <p class="progress-detail" id="frameProgressDetail">Preparing...</p>
+                </div>
+                
+                <div class="progress-section">
+                    <div class="progress-label">
+                        <span>Creating Video</span>
+                        <span id="videoProgressPercent">0%</span>
+                    </div>
+                    <div class="loading-bar-track">
+                        <div class="loading-bar-fill" id="videoProgressBar"></div>
+                    </div>
+                    <p class="progress-detail" id="videoProgressDetail">Waiting...</p>
+                </div>
+            </div>
+            
+            <p class="loading-status" id="loadingStatus">Preparing export...</p>
+        </div>
+    </div>
+
+    <!-- Video Settings Modal -->
+    <div id="videoSettingsModal" class="modal hidden">
+        <div class="modal-content save-modal-content">
+            <h3>Export Video</h3>
+            <p class="video-warning-text">⚠️ Video rendering requires intensive calculations. Please be patient and don't be alarmed if your device heats up!</p>
+            <div class="input-group">
+                <label>Resolution</label>
+                <div class="resolution-grid video-resolution-grid">
+                    <button class="video-option selected" data-video-height="720">
+                        <span class="resolution-label">HD</span>
+                        <span class="resolution-detail" id="hdResolutionDetail">1280 × 720</span>
+                    </button>
+                    <button class="video-option" data-video-height="1080">
+                        <span class="resolution-label">FHD</span>
+                        <span class="resolution-detail" id="fhdResolutionDetail">1920 × 1080</span>
+                    </button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Frame Rate</label>
+                <div class="resolution-grid video-fps-grid">
+                    <button class="video-fps-option selected" data-video-fps="30">
+                        <span class="resolution-label">30 FPS</span>
+                        <span class="resolution-detail">Smooth</span>
+                    </button>
+                    <button class="video-fps-option" data-video-fps="60">
+                        <span class="resolution-label">60 FPS</span>
+                        <span class="resolution-detail">Ultra Smooth</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="cancelVideoBtn" class="btn-secondary">Cancel</button>
+                <button id="startRenderBtn" class="btn-primary">Start Render</button>
             </div>
         </div>
     </div>

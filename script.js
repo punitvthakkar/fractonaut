@@ -1,12 +1,12 @@
 // Shaders
-const vsSource = `
-    attribute vec4 aVertexPosition;
+const vsSource = `#version 300 es
+    in vec4 aVertexPosition;
     void main() {
         gl_Position = aVertexPosition;
     }
 `;
 
-const fsSource = `
+const fsSource = `#version 300 es
     precision highp float;
 
     uniform vec2 u_resolution;
@@ -22,6 +22,12 @@ const fsSource = `
     // New Uniforms
     uniform int u_fractalType; // 0: Mandelbrot, 1: Julia, 2: Bifurcation
     uniform vec2 u_juliaC;
+
+    // Output color
+    out vec4 outColor;
+
+    // Constants
+    const float split = 8193.0;
 
     // Emulated double math functions
     vec2 ds_add(vec2 dsa, vec2 dsb) {
@@ -49,7 +55,7 @@ const fsSource = `
     vec2 ds_mul(vec2 dsa, vec2 dsb) {
         vec2 dsc;
         float c11, c21, c2, e, t1, t2;
-        float a1, a2, b1, b2, cona, conb, split = 8193.0;
+        float a1, a2, b1, b2, cona, conb;
         
         cona = dsa.x * split;
         a1 = cona - (cona - dsa.x);
@@ -70,6 +76,31 @@ const fsSource = `
         t1 = c11 + c2;
         e = t1 - c11;
         t2 = dsa.y * dsb.y + ((c2 - e) + (c11 - (t1 - e))) + c21;
+        
+        dsc.x = t1 + t2;
+        dsc.y = t2 - (dsc.x - t1);
+        return dsc;
+    }
+
+    vec2 ds_sqr(vec2 dsa) {
+        vec2 dsc;
+        float c11, c21, c2, e, t1, t2;
+        float a1, a2, cona;
+        
+        cona = dsa.x * split;
+        a1 = cona - (cona - dsa.x);
+        a2 = dsa.x - a1;
+        
+        c11 = dsa.x * dsa.x;
+        c21 = a1 * a1 - c11;
+        c21 += 2.0 * a1 * a2;
+        c21 += a2 * a2;
+        
+        c2 = 2.0 * dsa.x * dsa.y;
+        
+        t1 = c11 + c2;
+        e = t1 - c11;
+        t2 = dsa.y * dsa.y + ((c2 - e) + (c11 - (t1 - e))) + c21;
         
         dsc.x = t1 + t2;
         dsc.y = t2 - (dsc.x - t1);
@@ -117,12 +148,12 @@ const fsSource = `
             
             // Coloring based on trap distance
             float t = 0.5 + 0.5 * sin(d * 4.0 + float(u_paletteId));
-            vec4 color = texture2D(u_paletteTexture, vec2(t, 0.0));
+            vec4 color = texture(u_paletteTexture, vec2(t, 0.0));
             
             // Make background black-ish
             if (length(z) > 2.0) color *= 0.0;
             
-            gl_FragColor = color;
+            outColor = color;
             return;
         }
 
@@ -152,8 +183,8 @@ const fsSource = `
             for (int i = 0; i < 10000; i++) {
                 if (i >= u_maxIterations) break;
                 
-                vec2 z_x2 = ds_mul(z_x, z_x);
-                vec2 z_y2 = ds_mul(z_y, z_y);
+                vec2 z_x2 = ds_sqr(z_x);
+                vec2 z_y2 = ds_sqr(z_y);
                 
                 if (z_x2.x + z_y2.x > 4.0) {
                     escaped = true;
@@ -162,9 +193,8 @@ const fsSource = `
                     break;
                 }
 
-                vec2 two = vec2(2.0, 0.0);
                 vec2 z_xy = ds_mul(z_x, z_y);
-                vec2 two_z_xy = ds_mul(two, z_xy);
+                vec2 two_z_xy = ds_add(z_xy, z_xy);
                 vec2 new_y = ds_add(two_z_xy, c_y);
 
                 vec2 diff_sq = ds_sub(z_x2, z_y2);
@@ -191,7 +221,7 @@ const fsSource = `
                     if (c.x < p - 2.0 * p * p + 0.25) {
                         iterations = float(u_maxIterations);
                         // Skip loop
-                        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        outColor = vec4(0.0, 0.0, 0.0, 1.0);
                         return;
                     } 
                 }
@@ -233,7 +263,7 @@ const fsSource = `
             } else if (u_paletteId == 4) {
                 // Extreme (Texture)
                 float cycle = mod(smooth_i, 512.0) / 512.0;
-                color = texture2D(u_paletteTexture, vec2(cycle, 0.5)).rgb;
+                color = texture(u_paletteTexture, vec2(cycle, 0.5)).rgb;
             } else if (u_paletteId == 5) {
                 // Neon Nights
                 color = palette(t * 4.0, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.3, 0.2, 0.2));
@@ -254,16 +284,22 @@ const fsSource = `
                 color = palette(t * 8.0, vec3(0.2, 0.7, 0.4), vec3(0.5, 0.2, 0.3), vec3(1.0), vec3(0.0, 0.1, 0.0));
             }
             
-            gl_FragColor = vec4(color, 1.0);
+            outColor = vec4(color, 1.0);
         } else {
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            outColor = vec4(0.0, 0.0, 0.0, 1.0);
         }
     }
 `;
 
 // Main Logic
 const canvas = document.getElementById('glCanvas');
-const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+const gl = canvas.getContext('webgl2', {
+    preserveDrawingBuffer: false, // Optimization: Don't keep buffer
+    alpha: false, // Optimization: No transparency needed
+    antialias: false, // Optimization: We do our own rendering
+    depth: false, // Optimization: No depth buffer needed
+    stencil: false // Optimization: No stencil buffer needed
+});
 
 if (!gl) {
     alert('Unable to initialize WebGL. Your browser or machine may not support it.');
@@ -289,7 +325,7 @@ function getScreenContext() {
 let state = {
     zoomCenter: { x: -0.74364388703, y: 0.1318259042 }, // Start at Seahorse Valley
     zoomSize: 3.0,
-    maxIterations: 500,
+    maxIterations: getScreenContext().isMobile ? 300 : 500, // Lower default for mobile, but adjustable
     paletteId: 0,
     isDragging: false,
     lastMouse: { x: 0, y: 0 },
@@ -308,7 +344,17 @@ let state = {
     juliaC: { x: -0.7269, y: 0.1889 },
     circleDrag: { active: false, startX: 0, startY: 0, startIter: 0 },
     pendingInteraction: null, // For RAF-throttled interactions
-    interactionRAF: null // Track RAF ID for interactions
+    interactionRAF: null, // Track RAF ID for interactions
+    exportResolution: { width: 3840, height: 2160 }, // Default 4K export resolution
+
+    // Performance Logging
+    isTestMode: true, // Enable logging
+    perfLogs: [],
+    perfStartTime: 0,
+    perfTimer: null,
+    currentFps: 0,
+    frameCount: 0,
+    lastFpsTime: 0
 };
 
 const locations = {
@@ -590,6 +636,19 @@ function drawScene(timestamp) {
     const deltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
 
+    // FPS Calculation
+    state.frameCount++;
+    if (timestamp - state.lastFpsTime >= 500) {
+        state.currentFps = Math.round((state.frameCount * 1000) / (timestamp - state.lastFpsTime));
+        state.frameCount = 0;
+        state.lastFpsTime = timestamp;
+
+        // Log data if in test mode and active
+        if (state.isTestMode && state.perfTimer) {
+            logPerformanceData();
+        }
+    }
+
     // Velocity physics - only when not dragging or animating
     if (!state.isDragging && !state.isAnimating) {
         const dt60 = deltaTime * 60;
@@ -615,7 +674,7 @@ function drawScene(timestamp) {
     // Smooth interpolation
     if (!state.isAnimating) {
         const lerpFactor = 1.0 - Math.pow(0.1, deltaTime * 10);
-        
+
         // Apply smooth zoom limit at 0.5x (zoomSize = 6.0)
         const maxZoomSize = 6.0;
         if (state.targetZoomSize > maxZoomSize) {
@@ -625,12 +684,12 @@ function drawScene(timestamp) {
             state.targetZoomCenter.x = 0.75;
             state.targetZoomCenter.y = 0.0;
         }
-        
+
         // Single lerp calculation for all axes
         const diffSize = state.targetZoomSize - state.zoomSize;
         const diffX = state.targetZoomCenter.x - state.zoomCenter.x;
         const diffY = state.targetZoomCenter.y - state.zoomCenter.y;
-        
+
         state.zoomSize += diffSize * lerpFactor;
         state.zoomCenter.x += diffX * lerpFactor;
         state.zoomCenter.y += diffY * lerpFactor;
@@ -682,12 +741,145 @@ function drawScene(timestamp) {
 }
 
 function resizeCanvasToDisplaySize(canvas) {
-    const displayWidth = canvas.clientWidth;
-    const displayHeight = canvas.clientHeight;
+    // Cap DPR to ensure performance on high-res mobile screens
+    // 3x rendering is overkill for this shader and causes stutter
+    const screenCtx = getScreenContext();
+    const maxDpr = screenCtx.isMobile ? 1.5 : 2.0;
+    const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
+
+    const displayWidth = Math.round(canvas.clientWidth * dpr);
+    const displayHeight = Math.round(canvas.clientHeight * dpr);
+
     if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
         canvas.width = displayWidth;
         canvas.height = displayHeight;
     }
+}
+
+/**
+ * Renders the current fractal view to a high-resolution off-screen canvas
+ * @param {number} exportWidth - Desired export width (e.g., 3840 for 4K)
+ * @param {number} exportHeight - Desired export height (e.g., 2160 for 4K)
+ * @returns {Promise<string>} Promise resolving to data URL of the rendered image
+ */
+async function renderHighResolutionExport(exportWidth = 3840, exportHeight = 2160) {
+    return new Promise((resolve, reject) => {
+        try {
+            // Create off-screen canvas
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = exportWidth;
+            exportCanvas.height = exportHeight;
+            
+            // Create WebGL context for export canvas
+            const exportGl = exportCanvas.getContext('webgl2', {
+                preserveDrawingBuffer: true, // Important: keep buffer for export
+                alpha: false,
+                antialias: false,
+                depth: false,
+                stencil: false
+            });
+            
+            if (!exportGl) {
+                reject(new Error('Failed to create WebGL context for export'));
+                return;
+            }
+            
+            // Initialize shader program for export context (reuse same shaders)
+            const exportShaderProgram = initShaderProgram(exportGl, vsSource, fsSource);
+            if (!exportShaderProgram) {
+                reject(new Error('Failed to initialize shader program for export'));
+                return;
+            }
+            
+            // Set up program info for export context
+            const exportProgramInfo = {
+                program: exportShaderProgram,
+                attribLocations: {
+                    vertexPosition: exportGl.getAttribLocation(exportShaderProgram, 'aVertexPosition'),
+                },
+                uniformLocations: {
+                    resolution: exportGl.getUniformLocation(exportShaderProgram, 'u_resolution'),
+                    zoomCenterX: exportGl.getUniformLocation(exportShaderProgram, 'u_zoomCenter_x'),
+                    zoomCenterY: exportGl.getUniformLocation(exportShaderProgram, 'u_zoomCenter_y'),
+                    zoomSize: exportGl.getUniformLocation(exportShaderProgram, 'u_zoomSize'),
+                    maxIterations: exportGl.getUniformLocation(exportShaderProgram, 'u_maxIterations'),
+                    paletteId: exportGl.getUniformLocation(exportShaderProgram, 'u_paletteId'),
+                    highPrecision: exportGl.getUniformLocation(exportShaderProgram, 'u_highPrecision'),
+                    paletteTexture: exportGl.getUniformLocation(exportShaderProgram, 'u_paletteTexture'),
+                    fractalType: exportGl.getUniformLocation(exportShaderProgram, 'u_fractalType'),
+                    juliaC: exportGl.getUniformLocation(exportShaderProgram, 'u_juliaC'),
+                },
+            };
+            
+            // Create position buffer for export context
+            const exportPositionBuffer = exportGl.createBuffer();
+            exportGl.bindBuffer(exportGl.ARRAY_BUFFER, exportPositionBuffer);
+            const positions = [-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0];
+            exportGl.bufferData(exportGl.ARRAY_BUFFER, new Float32Array(positions), exportGl.STATIC_DRAW);
+            
+            // Create palette texture for export context
+            const exportPaletteTexture = exportGl.createTexture();
+            exportGl.bindTexture(exportGl.TEXTURE_2D, exportPaletteTexture);
+            const textureData = generateFractalExtremePalette();
+            exportGl.texImage2D(exportGl.TEXTURE_2D, 0, exportGl.RGBA, 2048, 1, 0, exportGl.RGBA, exportGl.UNSIGNED_BYTE, textureData);
+            exportGl.texParameteri(exportGl.TEXTURE_2D, exportGl.TEXTURE_WRAP_S, exportGl.REPEAT);
+            exportGl.texParameteri(exportGl.TEXTURE_2D, exportGl.TEXTURE_WRAP_T, exportGl.REPEAT);
+            exportGl.texParameteri(exportGl.TEXTURE_2D, exportGl.TEXTURE_MIN_FILTER, exportGl.LINEAR);
+            exportGl.texParameteri(exportGl.TEXTURE_2D, exportGl.TEXTURE_MAG_FILTER, exportGl.LINEAR);
+            
+            // Set viewport
+            exportGl.viewport(0, 0, exportWidth, exportHeight);
+            
+            // Clear and render
+            exportGl.clearColor(0.0, 0.0, 0.0, 1.0);
+            exportGl.clear(exportGl.COLOR_BUFFER_BIT);
+            
+            exportGl.useProgram(exportProgramInfo.program);
+            
+            // Vertex setup
+            exportGl.bindBuffer(exportGl.ARRAY_BUFFER, exportPositionBuffer);
+            exportGl.vertexAttribPointer(exportProgramInfo.attribLocations.vertexPosition, 2, exportGl.FLOAT, false, 0, 0);
+            exportGl.enableVertexAttribArray(exportProgramInfo.attribLocations.vertexPosition);
+            
+            // Set uniforms with current state
+            exportGl.uniform2f(exportProgramInfo.uniformLocations.resolution, exportWidth, exportHeight);
+            
+            const centerXSplit = splitDouble(state.zoomCenter.x);
+            const centerYSplit = splitDouble(state.zoomCenter.y);
+            const zoomSizeSplit = splitDouble(state.zoomSize);
+            
+            exportGl.uniform2f(exportProgramInfo.uniformLocations.zoomCenterX, centerXSplit[0], centerXSplit[1]);
+            exportGl.uniform2f(exportProgramInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
+            exportGl.uniform2f(exportProgramInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
+            
+            exportGl.uniform1i(exportProgramInfo.uniformLocations.maxIterations, state.maxIterations);
+            exportGl.uniform1i(exportProgramInfo.uniformLocations.paletteId, state.paletteId);
+            exportGl.uniform1i(exportProgramInfo.uniformLocations.fractalType, state.fractalType);
+            exportGl.uniform2f(exportProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
+            
+            const highPrecision = state.zoomSize < 0.001 && state.fractalType < 2;
+            exportGl.uniform1i(exportProgramInfo.uniformLocations.highPrecision, highPrecision ? 1 : 0);
+            
+            exportGl.activeTexture(exportGl.TEXTURE0);
+            exportGl.bindTexture(exportGl.TEXTURE_2D, exportPaletteTexture);
+            exportGl.uniform1i(exportProgramInfo.uniformLocations.paletteTexture, 0);
+            
+            // Render
+            exportGl.drawArrays(exportGl.TRIANGLE_STRIP, 0, 4);
+            
+            // Export as data URL
+            const dataUrl = exportCanvas.toDataURL('image/png');
+            
+            // Cleanup
+            exportGl.deleteBuffer(exportPositionBuffer);
+            exportGl.deleteTexture(exportPaletteTexture);
+            exportGl.deleteProgram(exportShaderProgram);
+            
+            resolve(dataUrl);
+        } catch (error) {
+            reject(error);
+        }
+    });
 }
 
 function updateStats() {
@@ -721,10 +913,10 @@ function renderCatalogue() {
     allLocations.forEach(loc => {
         const item = document.createElement('div');
         item.className = 'catalogue-item';
-        
+
         // Check if this is a saved location (has an id that's a timestamp string)
         const isSavedLocation = savedLocations.some(saved => saved.id === loc.id);
-        
+
         item.innerHTML = `
             <div class="catalogue-item-content">
                 <h4>${loc.title}</h4>
@@ -752,13 +944,13 @@ function renderCatalogue() {
                 </div>
             ` : ''}
         `;
-        
+
         // Main click to start journey
         const contentDiv = item.querySelector('.catalogue-item-content');
         if (contentDiv) {
             contentDiv.onclick = () => startHypnoticJourney(loc);
         }
-        
+
         // Share button handler
         const shareBtn = item.querySelector('.share-btn');
         if (shareBtn) {
@@ -767,7 +959,7 @@ function renderCatalogue() {
                 shareLocation(loc);
             });
         }
-        
+
         // Delete button handler
         const deleteBtn = item.querySelector('.delete-btn');
         if (deleteBtn) {
@@ -776,7 +968,7 @@ function renderCatalogue() {
                 deleteLocation(loc.id);
             });
         }
-        
+
         container.appendChild(item);
     });
 }
@@ -884,7 +1076,7 @@ function startHypnoticJourney(loc) {
 
     function animate() {
         if (!state.isAnimating) return; // Safety check
-        
+
         const now = Date.now();
         const elapsed = (now - startTime) / 1000;
         const t = Math.min(elapsed / duration, 1.0);
@@ -916,7 +1108,7 @@ function startHypnoticJourney(loc) {
             state.targetZoomCenter.y = loc.y;
             state.zoomCenter.x = loc.x;
             state.zoomCenter.y = loc.y;
-            
+
             // Use requestAnimationFrame to ensure drawScene processes final frame first
             requestAnimationFrame(() => {
                 state.isAnimating = false;
@@ -939,7 +1131,7 @@ function startHypnoticJourney(loc) {
 function showShareButtonPopup(loc) {
     const popup = document.getElementById('shareButtonPopup');
     const shareBtn = document.getElementById('shareLocationBtn');
-    
+
     // Generate share URL
     const zoom = loc.zoom || (3.0 / state.zoomSize);
     const params = new URLSearchParams({
@@ -1006,6 +1198,76 @@ function showShareButtonPopup(loc) {
 // Initialize Catalogue
 renderCatalogue();
 
+// Performance Logging Logic
+function startPerformanceLogging() {
+    if (!state.isTestMode) return;
+
+    console.log('Starting performance logging...');
+    state.perfLogs = [];
+    state.perfStartTime = Date.now();
+
+    // Clear existing timer if any
+    if (state.perfTimer) clearInterval(state.perfTimer);
+
+    // We use the draw loop for timing to sync with frames, 
+    // but we set a flag here to indicate logging is active.
+    // Actually, let's just set a simple interval for the stop condition check
+    // and rely on drawScene for the actual data capture to get accurate FPS.
+    // Wait, user asked for 500ms interval.
+    // I implemented the capture inside drawScene's 500ms FPS check block.
+    // So here we just set the "active" state.
+    state.perfTimer = true; // Flag to say "we are logging"
+
+    // Stop after 30 seconds
+    setTimeout(() => {
+        stopPerformanceLogging();
+    }, 30000);
+}
+
+function logPerformanceData() {
+    const elapsed = (Date.now() - state.perfStartTime) / 1000;
+    const entry = {
+        time: elapsed.toFixed(1),
+        fps: state.currentFps,
+        x: state.zoomCenter.x.toFixed(6),
+        y: state.zoomCenter.y.toFixed(6),
+        zoom: (3.0 / state.zoomSize).toFixed(2),
+        iterations: state.maxIterations
+    };
+    state.perfLogs.push(entry);
+}
+
+function stopPerformanceLogging() {
+    if (!state.perfTimer) return;
+    state.perfTimer = false;
+    console.log('Performance logging complete. Downloading CSV...');
+    // downloadPerformanceCSV();
+}
+
+// function downloadPerformanceCSV() {
+//     if (state.perfLogs.length === 0) return;
+
+//     const headers = ['Time (s)', 'FPS', 'X', 'Y', 'Zoom', 'Iterations'];
+//     const rows = state.perfLogs.map(log =>
+//         `${log.time},${log.fps},${log.x},${log.y},${log.zoom},${log.iterations}`
+//     );
+
+//     const csvContent = "data:text/csv;charset=utf-8,"
+//         + headers.join(",") + "\n"
+//         + rows.join("\n");
+
+//     const encodedUri = encodeURI(csvContent);
+//     const link = document.createElement("a");
+//     link.setAttribute("href", encodedUri);
+//     link.setAttribute("download", `fractonaut_perf_log_${Date.now()}.csv`);
+//     document.body.appendChild(link);
+//     link.click();
+//     document.body.removeChild(link);
+// }
+
+// Start logging on load
+//startPerformanceLogging();
+
 // Context-aware zoom with screen size adaptation
 function handleZoom(delta, x, y) {
     const screenCtx = getScreenContext();
@@ -1024,12 +1286,13 @@ function handleZoom(delta, x, y) {
     const zoomFactor = 1.0 + (baseFactor * speedMultiplier) * Math.pow(state.targetZoomSize, 0.3);
 
     if (x === undefined || y === undefined) {
-        x = canvas.width / 2;
-        y = canvas.height / 2;
+        x = canvas.clientWidth / 2;
+        y = canvas.clientHeight / 2;
     }
 
-    const uvx = (x - canvas.width / 2) / canvas.height;
-    const uvy = (canvas.height - y - canvas.height / 2) / canvas.height;
+    // Use client dimensions (CSS pixels) because x/y are in CSS pixels
+    const uvx = (x - canvas.clientWidth / 2) / canvas.clientHeight;
+    const uvy = (canvas.clientHeight - y - canvas.clientHeight / 2) / canvas.clientHeight;
 
     const wx = state.targetZoomCenter.x + uvx * state.targetZoomSize;
     const wy = state.targetZoomCenter.y + uvy * state.targetZoomSize;
@@ -1047,7 +1310,7 @@ function handleZoom(delta, x, y) {
         const excess = state.targetZoomSize - maxZoomSize;
         const resistance = 1.0 / (1.0 + excess * 0.5);
         state.targetZoomSize = maxZoomSize + excess * resistance;
-        
+
         // Snap center to (0.75, 0) when at limit
         state.targetZoomCenter.x = 0.75;
         state.targetZoomCenter.y = 0.0;
@@ -1226,7 +1489,7 @@ function initSaveSystem() {
 
             // Show modal
             modal.classList.remove('hidden');
-            
+
             // Focus on name input and open keyboard (mobile)
             setTimeout(() => {
                 nameInput.focus();
@@ -1292,7 +1555,7 @@ function showAddLocationModal(params) {
     // Handle confirm
     confirmBtn.onclick = () => {
         modal.classList.add('hidden');
-        
+
         // Save location to localStorage
         const newLoc = {
             id: Date.now().toString(),
@@ -1373,34 +1636,34 @@ function calculateDurationFromZoom(zoom) {
     // 2. Logarithmic scaling matches exponential nature of zoom
     // 3. Deeper zooms need more time for detail rendering
     // 4. Capped at reasonable maximum to avoid excessive wait times
-    
+
     // Constants for smooth animation
     const TARGET_FPS = 60; // Standard GPU frame rate for smooth animation
     const MIN_DURATION = 4.0; // Minimum seconds for smooth shallow zoom (240 frames)
     const MAX_DURATION = 60.0; // Maximum seconds for very deep zooms (3600 frames)
-    
+
     // Clamp zoom to reasonable range (1x to 100,000x)
     const clampedZoom = Math.max(1.0, Math.min(zoom, 100000.0));
-    
+
     // Use logarithmic scaling since zoom is exponential
     // log10(zoom) converts exponential zoom to linear scale
     // Example: zoom 1x → log=0, zoom 10x → log=1, zoom 100x → log=2, zoom 1000x → log=3
     const logZoom = Math.log10(clampedZoom);
-    
+
     // Normalize log zoom to 0-1 range
     // log10(1) = 0, log10(100000) ≈ 5
     const logMin = 0;
     const logMax = 5;
     const normalizedLog = Math.min(1.0, (logZoom - logMin) / (logMax - logMin));
-    
+
     // Apply smooth easing curve for natural feel
     // Quadratic easing: slower start, faster end (feels more natural for deep zooms)
     const easedNormalized = normalizedLog * normalizedLog;
-    
+
     // Calculate duration: linear interpolation between min and max
     // Formula: duration = MIN + (eased * (MAX - MIN))
     const duration = MIN_DURATION + (easedNormalized * (MAX_DURATION - MIN_DURATION));
-    
+
     // Round to nearest 0.5 seconds for cleaner UI values
     return Math.round(duration * 2) / 2;
 }
@@ -1604,8 +1867,8 @@ canvas.addEventListener('touchmove', (e) => {
                     // Adaptive zoom sensitivity for mobile
                     const zoomStrength = screenCtx.isMobile ? 0.003 : 0.005;
 
-                    const uvx = (centerX - canvas.width / 2) / canvas.height;
-                    const uvy = (canvas.height - centerY - canvas.height / 2) / canvas.height;
+                    const uvx = (centerX - canvas.clientWidth / 2) / canvas.clientHeight;
+                    const uvy = (canvas.clientHeight - centerY - canvas.clientHeight / 2) / canvas.clientHeight;
 
                     const wx = state.targetZoomCenter.x + uvx * state.targetZoomSize;
                     const wy = state.targetZoomCenter.y + uvy * state.targetZoomSize;
@@ -1623,7 +1886,7 @@ canvas.addEventListener('touchmove', (e) => {
                         const excess = state.targetZoomSize - maxZoomSize;
                         const resistance = 1.0 / (1.0 + excess * 0.5);
                         state.targetZoomSize = maxZoomSize + excess * resistance;
-                        
+
                         // Snap center to (0.75, 0) when at limit
                         state.targetZoomCenter.x = 0.75;
                         state.targetZoomCenter.y = 0.0;
@@ -1695,10 +1958,10 @@ document.querySelectorAll('.palette-card').forEach(btn => {
 // Reset function (shared by both reset buttons)
 function resetView() {
     state.velocity = { x: 0, y: 0 };
-    
+
     // Randomly select palette (0-9, 10 palettes total)
     state.paletteId = Math.floor(Math.random() * 10);
-    
+
     // Randomly select complexity based on fractal type
     if (state.fractalType === 2) { // Sierpinski
         state.targetZoomCenter = { x: 0.5, y: 0.288 };
@@ -1731,7 +1994,7 @@ function resetView() {
     const iterValueEl = document.getElementById('iterValue');
     if (iterationsEl) iterationsEl.value = state.maxIterations;
     if (iterValueEl) iterValueEl.innerText = state.maxIterations;
-    
+
     // Update palette UI to show random selection
     document.querySelectorAll('.palette-card').forEach(c => c.classList.remove('active'));
     const selectedPaletteBtn = document.querySelector(`.palette-card[data-palette="${state.paletteId}"]`);
@@ -1752,15 +2015,202 @@ if (resetButton) {
     resetButton.addEventListener('click', resetView);
 }
 
+// Export Resolution Selection Modal
+function initExportResolutionModal() {
+    const modal = document.getElementById('exportResolutionModal');
+    // Scope selectors to only the export resolution modal (not video modal)
+    const resolutionOptions = modal.querySelectorAll('.resolution-option');
+    const cancelBtn = document.getElementById('cancelExportBtn');
+    const confirmBtn = document.getElementById('confirmExportBtn');
+    let selectedResolution = null;
+
+    // Set default selection (4K)
+    if (resolutionOptions.length > 0) {
+        resolutionOptions[0].classList.add('selected');
+        selectedResolution = {
+            width: parseInt(resolutionOptions[0].dataset.width),
+            height: parseInt(resolutionOptions[0].dataset.height)
+        };
+        confirmBtn.disabled = false;
+    }
+
+    // Handle resolution option clicks
+    resolutionOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            // Remove selected class from all options within this modal only
+            resolutionOptions.forEach(opt => opt.classList.remove('selected'));
+            // Add selected class to clicked option
+            option.classList.add('selected');
+            
+            selectedResolution = {
+                width: parseInt(option.dataset.width),
+                height: parseInt(option.dataset.height)
+            };
+            confirmBtn.disabled = false;
+        });
+    });
+
+    // Handle cancel
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            modal.classList.add('hidden');
+            selectedResolution = null;
+            // Reset to default (4K)
+            resolutionOptions.forEach(opt => opt.classList.remove('selected'));
+            if (resolutionOptions.length > 0) {
+                resolutionOptions[0].classList.add('selected');
+                selectedResolution = {
+                    width: parseInt(resolutionOptions[0].dataset.width),
+                    height: parseInt(resolutionOptions[0].dataset.height)
+                };
+            }
+        });
+    }
+
+    // Handle confirm export
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', async () => {
+            if (!selectedResolution) return;
+            
+            // Close modal
+            modal.classList.add('hidden');
+            
+            // Show loading overlay
+            const loadingOverlay = document.getElementById('exportLoadingOverlay');
+            const loadingBarFill = document.getElementById('loadingBarFill');
+            const loadingPercentage = document.getElementById('loadingPercentage');
+            const loadingStatus = document.getElementById('loadingStatus');
+            
+            if (loadingOverlay) {
+                loadingOverlay.classList.remove('hidden');
+            }
+            
+            // Helper function to update progress
+            const updateProgress = (percent, status) => {
+                if (loadingBarFill) {
+                    loadingBarFill.style.width = `${percent}%`;
+                }
+                if (loadingPercentage) {
+                    loadingPercentage.textContent = `${Math.round(percent)}%`;
+                }
+                if (loadingStatus) {
+                    loadingStatus.textContent = status;
+                }
+            };
+            
+            // Show loading state on screenshot button
+            const screenshotBtn = document.getElementById('screenshotBtn');
+            const btnSpan = screenshotBtn?.querySelector('span');
+            const originalText = btnSpan?.textContent;
+            if (btnSpan) {
+                btnSpan.textContent = 'Rendering...';
+            }
+            if (screenshotBtn) {
+                screenshotBtn.disabled = true;
+            }
+            
+            try {
+                // Calculate dimensions maintaining aspect ratio
+                const aspectRatio = canvas.clientWidth / canvas.clientHeight;
+                let exportWidth = selectedResolution.width;
+                let exportHeight = selectedResolution.height;
+                
+                // Adjust height to maintain aspect ratio if needed
+                const calculatedHeight = Math.round(exportWidth / aspectRatio);
+                if (Math.abs(calculatedHeight - exportHeight) / exportHeight > 0.1) {
+                    exportHeight = calculatedHeight;
+                }
+                
+                // Animate progress bar
+                updateProgress(10, 'Initializing export...');
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                updateProgress(30, 'Setting up high-resolution canvas...');
+                await new Promise(resolve => setTimeout(resolve, 150));
+                
+                updateProgress(50, 'Rendering fractal...');
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Render high-resolution version
+                const dataUrl = await renderHighResolutionExport(exportWidth, exportHeight);
+                
+                updateProgress(80, 'Processing image data...');
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                updateProgress(95, 'Preparing download...');
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                // Download
+                const link = document.createElement('a');
+                link.download = `fractonaut_${exportWidth}x${exportHeight}_${Date.now()}.png`;
+                link.href = dataUrl;
+                link.click();
+                
+                updateProgress(100, 'Export complete!');
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                showToast(`Exported at ${exportWidth}×${exportHeight}px`);
+            } catch (error) {
+                console.error('High-res export failed:', error);
+                updateProgress(0, 'Export failed. Trying standard resolution...');
+                
+                // Fallback to standard export
+                try {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    updateProgress(50, 'Rendering at display resolution...');
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    const link = document.createElement('a');
+                    link.download = `fractonaut_${Date.now()}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    
+                    updateProgress(100, 'Export complete!');
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    showToast('Exported at display resolution');
+                } catch (fallbackError) {
+                    console.error('Fallback export failed:', fallbackError);
+                    updateProgress(0, 'Export failed');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    showToast('Export failed');
+                }
+            } finally {
+                // Hide loading overlay
+                if (loadingOverlay) {
+                    loadingOverlay.classList.add('hidden');
+                }
+                
+                // Reset progress bar
+                updateProgress(0, '');
+                
+                // Restore button state
+                if (btnSpan) {
+                    btnSpan.textContent = originalText || 'Save';
+                }
+                if (screenshotBtn) {
+                    screenshotBtn.disabled = false;
+                }
+            }
+        });
+    }
+
+    return { modal, selectedResolution };
+}
+
 const screenshotBtn = document.getElementById('screenshotBtn');
 if (screenshotBtn) {
     screenshotBtn.addEventListener('click', () => {
-        const link = document.createElement('a');
-        link.download = `mandelbrot - ${Date.now()}.png`;
-        link.href = canvas.toDataURL();
-        link.click();
+        // Show resolution selection modal
+        const modal = document.getElementById('exportResolutionModal');
+        if (modal) {
+            modal.classList.remove('hidden');
+        }
     });
 }
+
+// Initialize export resolution modal
+initExportResolutionModal();
 
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 if (fullscreenBtn) {
@@ -1869,14 +2319,14 @@ function markAppInstalled() {
 function wasAppUninstalled() {
     const wasInstalled = localStorage.getItem('pwa_installed') === 'true';
     const isCurrentlyInstalled = isAppInstalled();
-    
+
     // If it was installed but is no longer in standalone mode, it was uninstalled
     if (wasInstalled && !isCurrentlyInstalled) {
         // Clear the installed flag so we can show prompt again
         localStorage.removeItem('pwa_installed');
         return true;
     }
-    
+
     return false;
 }
 
@@ -2028,6 +2478,411 @@ fractalCards.forEach(card => {
 
 // Start rendering
 requestAnimationFrame(drawScene);
+
+// --- Video Export Logic ---
+function initVideoSettingsModal() {
+    const modal = document.getElementById('videoSettingsModal');
+    const shareBtn = document.getElementById('shareVideoTrigger');
+    const cancelBtn = document.getElementById('cancelVideoBtn');
+    const startBtn = document.getElementById('startRenderBtn');
+    const resolutionOptions = modal.querySelectorAll('.video-option');
+    const fpsOptions = modal.querySelectorAll('.video-fps-option');
+    const hdDetail = document.getElementById('hdResolutionDetail');
+    const fhdDetail = document.getElementById('fhdResolutionDetail');
+
+    // Determine if mobile for portrait mode
+    const screenCtx = getScreenContext();
+    const isMobile = screenCtx.isMobile;
+
+    // Update resolution labels based on device
+    if (hdDetail) {
+        hdDetail.textContent = isMobile ? '720 × 1280' : '1280 × 720';
+    }
+    if (fhdDetail) {
+        fhdDetail.textContent = isMobile ? '1080 × 1920' : '1920 × 1080';
+    }
+
+    let selectedSettings = {
+        height: isMobile ? 1280 : 720,
+        width: isMobile ? 720 : 1280,
+        fps: 30,
+        isMobile: isMobile
+    };
+
+    if (shareBtn) {
+        shareBtn.addEventListener('click', () => {
+            // Re-check mobile status on open
+            const currentScreenCtx = getScreenContext();
+            const currentIsMobile = currentScreenCtx.isMobile;
+            
+            // Update labels
+            if (hdDetail) {
+                hdDetail.textContent = currentIsMobile ? '720 × 1280' : '1280 × 720';
+            }
+            if (fhdDetail) {
+                fhdDetail.textContent = currentIsMobile ? '1080 × 1920' : '1920 × 1080';
+            }
+            
+            // Update settings
+            selectedSettings.isMobile = currentIsMobile;
+            const selectedRes = modal.querySelector('.video-option.selected');
+            if (selectedRes) {
+                const h = parseInt(selectedRes.dataset.videoHeight);
+                if (currentIsMobile) {
+                    selectedSettings.width = h;
+                    selectedSettings.height = h === 720 ? 1280 : 1920;
+                } else {
+                    selectedSettings.height = h;
+                    selectedSettings.width = h === 720 ? 1280 : 1920;
+                }
+            }
+            
+            modal.classList.remove('hidden');
+        });
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            modal.classList.add('hidden');
+        });
+    }
+
+    resolutionOptions.forEach(opt => {
+        opt.addEventListener('click', () => {
+            resolutionOptions.forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            const h = parseInt(opt.dataset.videoHeight);
+            
+            // Check current mobile status
+            const currentScreenCtx = getScreenContext();
+            const currentIsMobile = currentScreenCtx.isMobile;
+            
+            if (currentIsMobile) {
+                // Portrait: width is smaller dimension
+                selectedSettings.width = h;
+                selectedSettings.height = h === 720 ? 1280 : 1920;
+            } else {
+                // Landscape: height is smaller dimension
+                selectedSettings.height = h;
+                selectedSettings.width = h === 720 ? 1280 : 1920;
+            }
+            selectedSettings.isMobile = currentIsMobile;
+        });
+    });
+
+    fpsOptions.forEach(opt => {
+        opt.addEventListener('click', () => {
+            fpsOptions.forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            selectedSettings.fps = parseInt(opt.dataset.videoFps);
+        });
+    });
+
+    if (startBtn) {
+        startBtn.addEventListener('click', () => {
+            modal.classList.add('hidden');
+            renderVideoJourney(selectedSettings);
+        });
+    }
+}
+
+async function renderVideoJourney(settings) {
+    const { width, height, fps } = settings;
+    const durationInput = document.getElementById('journeyDuration');
+    const duration = parseFloat(durationInput?.value) || 30;
+    const totalFrames = Math.round(duration * fps);
+
+    // Show loading overlay with dual progress bars
+    const loadingOverlay = document.getElementById('exportLoadingOverlay');
+    const loadingTitle = document.getElementById('exportLoadingTitle');
+    const singleProgressContainer = document.getElementById('singleProgressContainer');
+    const dualProgressContainer = document.getElementById('dualProgressContainer');
+    const loadingStatus = document.getElementById('loadingStatus');
+    
+    // Dual progress elements
+    const frameProgressBar = document.getElementById('frameProgressBar');
+    const frameProgressPercent = document.getElementById('frameProgressPercent');
+    const frameProgressDetail = document.getElementById('frameProgressDetail');
+    const videoProgressBar = document.getElementById('videoProgressBar');
+    const videoProgressPercent = document.getElementById('videoProgressPercent');
+    const videoProgressDetail = document.getElementById('videoProgressDetail');
+
+    // Setup for video export (dual progress)
+    if (loadingTitle) loadingTitle.textContent = 'Rendering Video';
+    if (singleProgressContainer) singleProgressContainer.classList.add('hidden');
+    if (dualProgressContainer) dualProgressContainer.classList.remove('hidden');
+    loadingOverlay.classList.remove('hidden');
+
+    const updateFrameProgress = (percent, detail) => {
+        if (frameProgressBar) frameProgressBar.style.width = `${percent}%`;
+        if (frameProgressPercent) frameProgressPercent.textContent = `${Math.round(percent)}%`;
+        if (frameProgressDetail) frameProgressDetail.textContent = detail;
+    };
+
+    const updateVideoProgress = (percent, detail) => {
+        if (videoProgressBar) videoProgressBar.style.width = `${percent}%`;
+        if (videoProgressPercent) videoProgressPercent.textContent = `${Math.round(percent)}%`;
+        if (videoProgressDetail) videoProgressDetail.textContent = detail;
+    };
+
+    const resetOverlay = () => {
+        if (singleProgressContainer) singleProgressContainer.classList.remove('hidden');
+        if (dualProgressContainer) dualProgressContainer.classList.add('hidden');
+        if (loadingTitle) loadingTitle.textContent = 'Exporting Fractal';
+        updateFrameProgress(0, 'Preparing...');
+        updateVideoProgress(0, 'Waiting...');
+    };
+
+    try {
+        updateFrameProgress(0, 'Initializing...');
+        updateVideoProgress(0, 'Waiting for frames...');
+        if (loadingStatus) loadingStatus.textContent = 'Setting up...';
+
+        // Check VideoEncoder support
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error('VideoEncoder not supported in this browser. Please use Chrome, Edge, or another modern browser.');
+        }
+
+        // Dynamic import mp4-muxer
+        let Mp4Muxer;
+        try {
+            const module = await import('https://unpkg.com/mp4-muxer@5.2.2/build/mp4-muxer.mjs');
+            Mp4Muxer = module;
+        } catch (e) {
+            throw new Error('Failed to load video muxer library. Please check your internet connection.');
+        }
+
+        // Create offscreen canvas
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = width;
+        offCanvas.height = height;
+        const offGl = offCanvas.getContext('webgl2', {
+            preserveDrawingBuffer: true,
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false
+        });
+
+        if (!offGl) throw new Error('Failed to create offscreen WebGL context');
+
+        // Setup Shader on offscreen canvas
+        const offProgram = initShaderProgram(offGl, vsSource, fsSource);
+        if (!offProgram) throw new Error('Failed to initialize shader program');
+
+        const offProgramInfo = {
+            program: offProgram,
+            attribLocations: {
+                vertexPosition: offGl.getAttribLocation(offProgram, 'aVertexPosition'),
+            },
+            uniformLocations: {
+                resolution: offGl.getUniformLocation(offProgram, 'u_resolution'),
+                zoomCenterX: offGl.getUniformLocation(offProgram, 'u_zoomCenter_x'),
+                zoomCenterY: offGl.getUniformLocation(offProgram, 'u_zoomCenter_y'),
+                zoomSize: offGl.getUniformLocation(offProgram, 'u_zoomSize'),
+                maxIterations: offGl.getUniformLocation(offProgram, 'u_maxIterations'),
+                paletteId: offGl.getUniformLocation(offProgram, 'u_paletteId'),
+                highPrecision: offGl.getUniformLocation(offProgram, 'u_highPrecision'),
+                paletteTexture: offGl.getUniformLocation(offProgram, 'u_paletteTexture'),
+                fractalType: offGl.getUniformLocation(offProgram, 'u_fractalType'),
+                juliaC: offGl.getUniformLocation(offProgram, 'u_juliaC'),
+            },
+        };
+
+        // Buffers for offscreen
+        const offPositionBuffer = offGl.createBuffer();
+        offGl.bindBuffer(offGl.ARRAY_BUFFER, offPositionBuffer);
+        const positions = [-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0];
+        offGl.bufferData(offGl.ARRAY_BUFFER, new Float32Array(positions), offGl.STATIC_DRAW);
+
+        // Palette texture for offscreen
+        const offPaletteTexture = offGl.createTexture();
+        offGl.bindTexture(offGl.TEXTURE_2D, offPaletteTexture);
+        offGl.texImage2D(offGl.TEXTURE_2D, 0, offGl.RGBA, 2048, 1, 0, offGl.RGBA, offGl.UNSIGNED_BYTE, textureData);
+        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_WRAP_S, offGl.REPEAT);
+        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_WRAP_T, offGl.REPEAT);
+        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_MIN_FILTER, offGl.LINEAR);
+        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_MAG_FILTER, offGl.LINEAR);
+
+        // Track actual encoding progress
+        let encodedChunks = 0;
+        
+        // Configure Muxer
+        const muxer = new Mp4Muxer.Muxer({
+            target: new Mp4Muxer.ArrayBufferTarget(),
+            video: {
+                codec: 'avc',
+                width: width,
+                height: height,
+            },
+            fastStart: 'in-memory'
+        });
+
+        // Configure VideoEncoder with real progress tracking
+        const videoEncoder = new VideoEncoder({
+            output: (chunk, meta) => {
+                muxer.addVideoChunk(chunk, meta);
+                encodedChunks++;
+                // Update encoding progress in real-time
+                const encodePercent = (encodedChunks / totalFrames) * 100;
+                updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames} chunks`);
+            },
+            error: (e) => {
+                console.error('VideoEncoder error:', e);
+                throw new Error('Video encoding error: ' + e.message);
+            }
+        });
+
+        // H.264 Baseline Profile for broad compatibility
+        const codecString = height <= 720 ? 'avc1.42001f' : 'avc1.640028';
+        const bitrate = Math.round(width * height * fps * 0.15); // Adaptive bitrate
+
+        videoEncoder.configure({
+            codec: codecString,
+            width: width,
+            height: height,
+            bitrate: bitrate,
+            framerate: fps
+        });
+
+        if (loadingStatus) loadingStatus.textContent = 'Rendering frames...';
+
+        // Get journey parameters - from z=1x to current zoom
+        const startSize = 3.0; // z = 1x
+        const targetSize = state.zoomSize; // Current view size is the target
+        const targetX = state.zoomCenter.x;
+        const targetY = state.zoomCenter.y;
+
+        const logStart = Math.log(startSize);
+        const logEnd = Math.log(targetSize);
+
+        // Rendering loop - real progress tracking
+        for (let i = 0; i < totalFrames; i++) {
+            // Calculate REAL progress based on actual frames rendered
+            const framePercent = ((i + 1) / totalFrames) * 100;
+            
+            // Update progress on every frame for accuracy, but yield less frequently for performance
+            updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
+            
+            // Yield to UI thread periodically to allow progress bar updates
+            if (i % Math.max(1, Math.floor(fps / 4)) === 0) {
+                await new Promise(r => setTimeout(r, 0));
+            }
+
+            const t = i / (totalFrames - 1);
+            // Smooth easing (same as flythrough)
+            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+            // Interpolate zoom logarithmically
+            const currentLog = logStart + (logEnd - logStart) * ease;
+            const currentZoomSize = Math.exp(currentLog);
+
+            // Render frame
+            offGl.viewport(0, 0, width, height);
+            offGl.clearColor(0.0, 0.0, 0.0, 1.0);
+            offGl.clear(offGl.COLOR_BUFFER_BIT);
+
+            offGl.useProgram(offProgramInfo.program);
+
+            offGl.bindBuffer(offGl.ARRAY_BUFFER, offPositionBuffer);
+            offGl.vertexAttribPointer(offProgramInfo.attribLocations.vertexPosition, 2, offGl.FLOAT, false, 0, 0);
+            offGl.enableVertexAttribArray(offProgramInfo.attribLocations.vertexPosition);
+
+            // Set uniforms
+            offGl.uniform2f(offProgramInfo.uniformLocations.resolution, width, height);
+
+            const centerXSplit = splitDouble(targetX);
+            const centerYSplit = splitDouble(targetY);
+            const zoomSizeSplit = splitDouble(currentZoomSize);
+
+            offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterX, centerXSplit[0], centerXSplit[1]);
+            offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
+            offGl.uniform2f(offProgramInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
+
+            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, state.maxIterations);
+            offGl.uniform1i(offProgramInfo.uniformLocations.paletteId, state.paletteId);
+            offGl.uniform1i(offProgramInfo.uniformLocations.fractalType, state.fractalType);
+            offGl.uniform2f(offProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
+
+            const highPrecision = currentZoomSize < 0.001 && state.fractalType < 2;
+            offGl.uniform1i(offProgramInfo.uniformLocations.highPrecision, highPrecision ? 1 : 0);
+
+            offGl.activeTexture(offGl.TEXTURE0);
+            offGl.bindTexture(offGl.TEXTURE_2D, offPaletteTexture);
+            offGl.uniform1i(offProgramInfo.uniformLocations.paletteTexture, 0);
+
+            offGl.drawArrays(offGl.TRIANGLE_STRIP, 0, 4);
+
+            // Encode frame
+            const frame = new VideoFrame(offCanvas, {
+                timestamp: i * (1000000 / fps), // microseconds
+                duration: Math.round(1000000 / fps)
+            });
+
+            // Keyframe every 2 seconds
+            const keyFrame = i % (fps * 2) === 0;
+
+            videoEncoder.encode(frame, { keyFrame });
+            frame.close();
+        }
+
+        // Frame rendering complete
+        updateFrameProgress(100, 'All frames rendered!');
+        if (loadingStatus) loadingStatus.textContent = 'Encoding video...';
+        
+        // Flush encoder - encoding progress is tracked via the output callback above
+        // The progress bar will update in real-time as chunks are encoded
+        await videoEncoder.flush();
+        
+        // Encoding complete
+        updateVideoProgress(100, 'All chunks encoded!');
+        if (loadingStatus) loadingStatus.textContent = 'Finalizing...';
+        
+        // Finalize muxer
+        muxer.finalize();
+
+        const { buffer } = muxer.target;
+        const blob = new Blob([buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+
+        // Download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `fractonaut_journey_${width}x${height}_${fps}fps_${Date.now()}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        if (loadingStatus) loadingStatus.textContent = 'Complete!';
+        
+        setTimeout(() => {
+            loadingOverlay.classList.add('hidden');
+            resetOverlay();
+            showToast(`Video exported at ${width}×${height} ${fps}fps`);
+        }, 1000);
+
+        // Cleanup WebGL context
+        try {
+            const loseContext = offGl.getExtension('WEBGL_lose_context');
+            if (loseContext) loseContext.loseContext();
+        } catch (e) {
+            // Ignore cleanup errors
+        }
+
+    } catch (err) {
+        console.error('Video rendering error:', err);
+        if (loadingStatus) loadingStatus.textContent = 'Error: ' + err.message;
+        setTimeout(() => {
+            loadingOverlay.classList.add('hidden');
+            resetOverlay();
+            alert('Video rendering failed: ' + err.message);
+        }, 2000);
+    }
+}
+
+// Initialize Video Settings Modal
+initVideoSettingsModal();
 
 // --- Service Worker Registration (PWA Update Check) ---
 if ('serviceWorker' in navigator) {

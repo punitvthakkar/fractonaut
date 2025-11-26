@@ -224,6 +224,23 @@ canvas:active {
     -webkit-transform: translateX(-50%) scale(0.95) translateZ(0);
 }
 
+/* Share Video Button - positioned further to the right */
+.share-video-button {
+    left: calc(50% + 160px);
+    transform: translateX(-50%) translateZ(0);
+    -webkit-transform: translateX(-50%) translateZ(0);
+}
+
+.share-video-button:hover {
+    transform: translateX(-50%) scale(1.05) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(1.05) translateZ(0);
+}
+
+.share-video-button:active {
+    transform: translateX(-50%) scale(0.95) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(0.95) translateZ(0);
+}
+
 /* Reset Button - positioned to the left of joystick */
 .reset-button {
     left: calc(50% - 88px);
@@ -1251,6 +1268,10 @@ canvas:active {
         left: calc(50% + 76px);
     }
 
+    .share-video-button {
+        left: calc(50% + 140px);
+    }
+
     .reset-button {
         left: calc(50% - 76px);
     }
@@ -1658,6 +1679,268 @@ input[type=range]::-webkit-slider-thumb:hover {
 .btn-secondary:hover {
     border-color: rgba(255, 255, 255, 0.5);
     color: #fff;
+}
+
+/* --- Resolution Selection Grid --- */
+.resolution-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.resolution-option {
+    padding: 16px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+}
+
+.resolution-option:hover {
+    background: rgba(0, 255, 255, 0.1);
+    border-color: rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    transform: translateY(-2px);
+}
+
+.resolution-option.selected {
+    background: rgba(0, 255, 255, 0.2);
+    border-color: rgba(0, 255, 255, 0.6);
+    color: #00ffff;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+.resolution-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.resolution-detail {
+    font-size: 0.75rem;
+    font-family: 'Space Mono', monospace;
+    opacity: 0.8;
+}
+
+/* Video Settings Modal - 2 column grid */
+.video-resolution-grid,
+.video-fps-grid {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+/* Video option buttons (separate from image export resolution options) */
+.video-option,
+.video-fps-option {
+    padding: 16px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+}
+
+.video-option:hover,
+.video-fps-option:hover {
+    background: rgba(0, 255, 255, 0.1);
+    border-color: rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    transform: translateY(-2px);
+}
+
+.video-option.selected,
+.video-fps-option.selected {
+    background: rgba(0, 255, 255, 0.2);
+    border-color: rgba(0, 255, 255, 0.6);
+    color: #00ffff;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+/* Video warning text */
+.video-warning-text {
+    font-size: 0.8rem;
+    color: rgba(255, 200, 100, 0.9);
+    background: rgba(255, 150, 0, 0.15);
+    border: 1px solid rgba(255, 150, 0, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.video-warning-text-small {
+    font-size: 0.75rem;
+    color: rgba(255, 200, 100, 0.9);
+    background: rgba(255, 150, 0, 0.1);
+    border: 1px solid rgba(255, 150, 0, 0.2);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 20px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+/* Dual progress container for video export */
+.dual-progress-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.dual-progress-container.hidden {
+    display: none;
+}
+
+.progress-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+}
+
+.progress-label span:last-child {
+    font-family: 'Space Mono', monospace;
+    color: #00ffff;
+}
+
+.progress-detail {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+    font-style: italic;
+}
+
+@media (max-width: 480px) {
+    .resolution-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .resolution-option {
+        padding: 20px 12px;
+    }
+
+    .video-resolution-grid,
+    .video-fps-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* --- Export Loading Overlay --- */
+.export-loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 3000;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.export-loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.export-loading-content {
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 20px;
+    padding: 40px;
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+    color: #fff;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: modalFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.export-loading-content h3 {
+    margin-top: 0;
+    margin-bottom: 24px;
+    color: #00ffff;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 1px;
+    font-size: 1.25rem;
+}
+
+.loading-bar-container {
+    margin: 24px 0;
+}
+
+.loading-bar-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.loading-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00ffff 0%, #0080ff 50%, #00ffff 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.3s ease;
+    animation: loadingBarShimmer 2s linear infinite;
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+}
+
+@keyframes loadingBarShimmer {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+.loading-percentage {
+    margin-top: 12px;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #00ffff;
+    font-family: 'Space Mono', monospace;
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+}
+
+.loading-status {
+    margin-top: 16px;
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-style: italic;
 }
 
 /* --- PWA Install Prompt --- */
