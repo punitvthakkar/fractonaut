@@ -630,9 +630,16 @@ const positions = [
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
 let lastTime = 0;
+let isVideoRendering = false; // Flag to pause main rendering during video export
 
 // Rendering - Optimized for smoothness
 function drawScene(timestamp) {
+    // Skip main rendering during video export to save memory
+    if (isVideoRendering) {
+        requestAnimationFrame(drawScene);
+        return;
+    }
+    
     if (!lastTime) lastTime = timestamp;
     const deltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
@@ -2488,6 +2495,7 @@ function initVideoSettingsModal() {
     const startBtn = document.getElementById('startRenderBtn');
     const resolutionOptions = modal.querySelectorAll('.video-option');
     const fpsOptions = modal.querySelectorAll('.video-fps-option');
+    const durationOptions = modal.querySelectorAll('.video-duration-option');
     const hdDetail = document.getElementById('hdResolutionDetail');
     const fhdDetail = document.getElementById('fhdResolutionDetail');
 
@@ -2507,6 +2515,7 @@ function initVideoSettingsModal() {
         height: isMobile ? 1280 : 720,
         width: isMobile ? 720 : 1280,
         fps: 30,
+        duration: 30,
         isMobile: isMobile
     };
 
@@ -2548,6 +2557,15 @@ function initVideoSettingsModal() {
         });
     }
 
+    // Duration selection
+    durationOptions.forEach(opt => {
+        opt.addEventListener('click', () => {
+            durationOptions.forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            selectedSettings.duration = parseInt(opt.dataset.videoDuration);
+        });
+    });
+
     resolutionOptions.forEach(opt => {
         opt.addEventListener('click', () => {
             resolutionOptions.forEach(o => o.classList.remove('selected'));
@@ -2588,10 +2606,23 @@ function initVideoSettingsModal() {
 }
 
 async function renderVideoJourney(settings) {
-    const { width, height, fps } = settings;
-    const durationInput = document.getElementById('journeyDuration');
-    const duration = parseFloat(durationInput?.value) || 30;
+    const { width, height, fps, duration } = settings;
     const totalFrames = Math.round(duration * fps);
+
+    // Save current state before pausing main render
+    const savedState = {
+        zoomCenter: { x: state.zoomCenter.x, y: state.zoomCenter.y },
+        zoomSize: state.zoomSize,
+        maxIterations: state.maxIterations,
+        paletteId: state.paletteId,
+        fractalType: state.fractalType,
+        juliaC: { x: state.juliaC.x, y: state.juliaC.y }
+    };
+
+    // Pause main rendering to free up memory
+    isVideoRendering = true;
+    const glCanvas = document.getElementById('glCanvas');
+    if (glCanvas) glCanvas.classList.add('rendering-paused');
 
     // Show loading overlay with dual progress bars
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
@@ -2632,6 +2663,25 @@ async function renderVideoJourney(settings) {
         if (loadingTitle) loadingTitle.textContent = 'Exporting Fractal';
         updateFrameProgress(0, 'Preparing...');
         updateVideoProgress(0, 'Waiting...');
+    };
+
+    const resumeMainRendering = () => {
+        // Resume main rendering
+        isVideoRendering = false;
+        if (glCanvas) glCanvas.classList.remove('rendering-paused');
+        
+        // Restore the saved state and trigger a re-render
+        state.zoomCenter.x = savedState.zoomCenter.x;
+        state.zoomCenter.y = savedState.zoomCenter.y;
+        state.zoomSize = savedState.zoomSize;
+        state.maxIterations = savedState.maxIterations;
+        state.paletteId = savedState.paletteId;
+        state.fractalType = savedState.fractalType;
+        state.juliaC.x = savedState.juliaC.x;
+        state.juliaC.y = savedState.juliaC.y;
+        
+        // Force a re-render of the main canvas
+        requestAnimationFrame(drawScene);
     };
 
     try {
@@ -2857,13 +2907,7 @@ async function renderVideoJourney(settings) {
 
         if (loadingStatus) loadingStatus.textContent = 'Complete!';
         
-        setTimeout(() => {
-            loadingOverlay.classList.add('hidden');
-            resetOverlay();
-            showToast(`Video exported at ${width}×${height} ${fps}fps`);
-        }, 1000);
-
-        // Cleanup WebGL context
+        // Cleanup WebGL context first to free memory
         try {
             const loseContext = offGl.getExtension('WEBGL_lose_context');
             if (loseContext) loseContext.loseContext();
@@ -2871,12 +2915,22 @@ async function renderVideoJourney(settings) {
             // Ignore cleanup errors
         }
 
+        setTimeout(() => {
+            loadingOverlay.classList.add('hidden');
+            resetOverlay();
+            // Resume main rendering after cleanup
+            resumeMainRendering();
+            showToast(`Video exported at ${width}×${height} ${fps}fps`);
+        }, 1000);
+
     } catch (err) {
         console.error('Video rendering error:', err);
         if (loadingStatus) loadingStatus.textContent = 'Error: ' + err.message;
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
             resetOverlay();
+            // Resume main rendering even on error
+            resumeMainRendering();
             alert('Video rendering failed: ' + err.message);
         }, 2000);
     }

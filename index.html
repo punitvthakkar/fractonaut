@@ -413,6 +413,23 @@
             <h3>Export Video</h3>
             <p class="video-warning-text">⚠️ Video rendering requires intensive calculations. Please be patient and don't be alarmed if your device heats up!</p>
             <div class="input-group">
+                <label>Duration (seconds)</label>
+                <div class="resolution-grid video-duration-grid">
+                    <button class="video-duration-option" data-video-duration="10">
+                        <span class="resolution-label">10s</span>
+                        <span class="resolution-detail">Quick</span>
+                    </button>
+                    <button class="video-duration-option selected" data-video-duration="30">
+                        <span class="resolution-label">30s</span>
+                        <span class="resolution-detail">Standard</span>
+                    </button>
+                    <button class="video-duration-option" data-video-duration="60">
+                        <span class="resolution-label">60s</span>
+                        <span class="resolution-detail">Long</span>
+                    </button>
+                </div>
+            </div>
+            <div class="input-group">
                 <label>Resolution</label>
                 <div class="resolution-grid video-resolution-grid">
                     <button class="video-option selected" data-video-height="720">
