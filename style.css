@@ -1836,9 +1836,15 @@ input[type=range]::-webkit-slider-thumb:hover {
     grid-template-columns: repeat(2, 1fr);
 }
 
+/* Video duration grid - 3 columns */
+.video-duration-grid {
+    grid-template-columns: repeat(3, 1fr);
+}
+
 /* Video option buttons (separate from image export resolution options) */
 .video-option,
-.video-fps-option {
+.video-fps-option,
+.video-duration-option {
     padding: 16px 12px;
     background: rgba(0, 0, 0, 0.3);
     border: 2px solid rgba(255, 255, 255, 0.2);
@@ -1854,7 +1860,8 @@ input[type=range]::-webkit-slider-thumb:hover {
 }
 
 .video-option:hover,
-.video-fps-option:hover {
+.video-fps-option:hover,
+.video-duration-option:hover {
     background: rgba(0, 255, 255, 0.1);
     border-color: rgba(0, 255, 255, 0.4);
     color: #00ffff;
@@ -1862,7 +1869,8 @@ input[type=range]::-webkit-slider-thumb:hover {
 }
 
 .video-option.selected,
-.video-fps-option.selected {
+.video-fps-option.selected,
+.video-duration-option.selected {
     background: rgba(0, 255, 255, 0.2);
     border-color: rgba(0, 255, 255, 0.6);
     color: #00ffff;
@@ -1930,6 +1938,33 @@ input[type=range]::-webkit-slider-thumb:hover {
     color: rgba(255, 255, 255, 0.6);
     margin: 0;
     font-style: italic;
+}
+
+/* Canvas blur during video rendering */
+#glCanvas.rendering-paused {
+    filter: blur(10px);
+    transition: filter 0.3s ease;
+}
+
+/* Video rendering backdrop */
+.video-rendering-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    z-index: 999;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.video-rendering-backdrop.active {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 @media (max-width: 480px) {
