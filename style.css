@@ -241,6 +241,57 @@ canvas:active {
     -webkit-transform: translateX(-50%) scale(0.95) translateZ(0);
 }
 
+/* Image Button - positioned to the left (mirror of video button) */
+.image-button {
+    left: calc(50% - 160px);
+    transform: translateX(-50%) translateZ(0);
+    -webkit-transform: translateX(-50%) translateZ(0);
+}
+
+.image-button:hover {
+    transform: translateX(-50%) scale(1.05) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(1.05) translateZ(0);
+}
+
+.image-button:active {
+    transform: translateX(-50%) scale(0.95) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(0.95) translateZ(0);
+}
+
+/* Color Button - positioned further to the left */
+.color-button {
+    left: calc(50% - 232px);
+    transform: translateX(-50%) translateZ(0);
+    -webkit-transform: translateX(-50%) translateZ(0);
+}
+
+.color-button:hover {
+    transform: translateX(-50%) scale(1.05) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(1.05) translateZ(0);
+}
+
+.color-button:active {
+    transform: translateX(-50%) scale(0.95) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(0.95) translateZ(0);
+}
+
+/* Full Screen Button - positioned further to the right */
+.fullscreen-button {
+    left: calc(50% + 232px);
+    transform: translateX(-50%) translateZ(0);
+    -webkit-transform: translateX(-50%) translateZ(0);
+}
+
+.fullscreen-button:hover {
+    transform: translateX(-50%) scale(1.05) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(1.05) translateZ(0);
+}
+
+.fullscreen-button:active {
+    transform: translateX(-50%) scale(0.95) translateZ(0);
+    -webkit-transform: translateX(-50%) scale(0.95) translateZ(0);
+}
+
 /* Reset Button - positioned to the left of joystick */
 .reset-button {
     left: calc(50% - 88px);
@@ -1269,11 +1320,23 @@ canvas:active {
     }
 
     .share-video-button {
-        left: calc(50% + 140px);
+        left: calc(50% + 132px);
+    }
+    
+    .fullscreen-button {
+        left: calc(50% + 188px);
     }
 
     .reset-button {
         left: calc(50% - 76px);
+    }
+    
+    .image-button {
+        left: calc(50% - 132px);
+    }
+    
+    .color-button {
+        left: calc(50% - 188px);
     }
 }
 

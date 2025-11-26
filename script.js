@@ -153,7 +153,8 @@ const fsSource = `#version 300 es
             // Make background black-ish
             if (length(z) > 2.0) color *= 0.0;
             
-            outColor = color;
+            // Invert colors completely (Sierpinski only)
+            outColor = vec4(1.0 - color.rgb, 1.0);
             return;
         }
 
@@ -2883,6 +2884,46 @@ async function renderVideoJourney(settings) {
 
 // Initialize Video Settings Modal
 initVideoSettingsModal();
+
+// Initialize new UI buttons
+function initNewUIControls() {
+    // 1. Image Button (Left) - Triggers Export Modal
+    const imageTrigger = document.getElementById('imageTrigger');
+    if (imageTrigger) {
+        imageTrigger.addEventListener('click', () => {
+            const modal = document.getElementById('exportResolutionModal');
+            if (modal) {
+                modal.classList.remove('hidden');
+            }
+        });
+    }
+
+    // 2. Color Button (Left of Image) - Toggles Colors
+    const colorTrigger = document.getElementById('colorTrigger');
+    if (colorTrigger) {
+        colorTrigger.addEventListener('click', () => {
+            // Cycle through 10 palettes (0-9)
+            state.paletteId = (state.paletteId + 1) % 10;
+            
+            // Update UI
+            document.querySelectorAll('.palette-card').forEach(c => c.classList.remove('active'));
+            const paletteBtn = document.querySelector(`.palette-card[data-palette="${state.paletteId}"]`);
+            if (paletteBtn) paletteBtn.classList.add('active');
+            
+            // Request redraw
+            requestAnimationFrame(drawScene);
+        });
+    }
+
+    // 3. Full Screen Button (Right of Video) - Toggles Full Screen
+    const fullscreenTrigger = document.getElementById('fullscreenTrigger');
+    if (fullscreenTrigger) {
+        fullscreenTrigger.addEventListener('click', () => {
+            toggleFullscreen();
+        });
+    }
+}
+initNewUIControls();
 
 // --- Service Worker Registration (PWA Update Check) ---
 if ('serviceWorker' in navigator) {
