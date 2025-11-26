@@ -630,16 +630,9 @@ const positions = [
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
 let lastTime = 0;
-let isVideoRendering = false; // Flag to pause main rendering during video export
 
 // Rendering - Optimized for smoothness
 function drawScene(timestamp) {
-    // Skip main rendering during video export to free up memory and GPU
-    if (isVideoRendering) {
-        requestAnimationFrame(drawScene);
-        return;
-    }
-    
     if (!lastTime) lastTime = timestamp;
     const deltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
@@ -2495,7 +2488,6 @@ function initVideoSettingsModal() {
     const startBtn = document.getElementById('startRenderBtn');
     const resolutionOptions = modal.querySelectorAll('.video-option');
     const fpsOptions = modal.querySelectorAll('.video-fps-option');
-    const durationOptions = modal.querySelectorAll('.video-duration-option');
     const hdDetail = document.getElementById('hdResolutionDetail');
     const fhdDetail = document.getElementById('fhdResolutionDetail');
 
@@ -2515,7 +2507,6 @@ function initVideoSettingsModal() {
         height: isMobile ? 1280 : 720,
         width: isMobile ? 720 : 1280,
         fps: 30,
-        duration: 30,
         isMobile: isMobile
     };
 
@@ -2588,14 +2579,6 @@ function initVideoSettingsModal() {
         });
     });
 
-    durationOptions.forEach(opt => {
-        opt.addEventListener('click', () => {
-            durationOptions.forEach(o => o.classList.remove('selected'));
-            opt.classList.add('selected');
-            selectedSettings.duration = parseInt(opt.dataset.videoDuration);
-        });
-    });
-
     if (startBtn) {
         startBtn.addEventListener('click', () => {
             modal.classList.add('hidden');
@@ -2605,31 +2588,10 @@ function initVideoSettingsModal() {
 }
 
 async function renderVideoJourney(settings) {
-    const { width, height, fps, duration } = settings;
+    const { width, height, fps } = settings;
+    const durationInput = document.getElementById('journeyDuration');
+    const duration = parseFloat(durationInput?.value) || 30;
     const totalFrames = Math.round(duration * fps);
-    
-    // Detect mobile for performance optimizations
-    const screenCtx = getScreenContext();
-    const isMobileDevice = screenCtx.isMobile;
-
-    // Save current state BEFORE pausing main render
-    // This captures the exact location where user pressed render
-    const savedState = {
-        zoomCenter: { x: state.zoomCenter.x, y: state.zoomCenter.y },
-        targetZoomCenter: { x: state.targetZoomCenter.x, y: state.targetZoomCenter.y },
-        zoomSize: state.zoomSize,
-        targetZoomSize: state.targetZoomSize,
-        maxIterations: state.maxIterations,
-        paletteId: state.paletteId,
-        fractalType: state.fractalType,
-        juliaC: { x: state.juliaC.x, y: state.juliaC.y }
-    };
-
-    // Pause main rendering to free up memory and GPU resources
-    isVideoRendering = true;
-    const glCanvas = document.getElementById('glCanvas');
-    if (glCanvas) glCanvas.classList.add('rendering-paused');
-    document.body.classList.add('video-rendering-active');
 
     // Show loading overlay with dual progress bars
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
@@ -2670,29 +2632,6 @@ async function renderVideoJourney(settings) {
         if (loadingTitle) loadingTitle.textContent = 'Exporting Fractal';
         updateFrameProgress(0, 'Preparing...');
         updateVideoProgress(0, 'Waiting...');
-    };
-
-    // Function to resume main rendering and restore state
-    const resumeMainRendering = () => {
-        // Remove blur and rendering class
-        if (glCanvas) glCanvas.classList.remove('rendering-paused');
-        document.body.classList.remove('video-rendering-active');
-        
-        // Restore the saved state - this puts user back exactly where they were
-        state.zoomCenter.x = savedState.zoomCenter.x;
-        state.zoomCenter.y = savedState.zoomCenter.y;
-        state.targetZoomCenter.x = savedState.targetZoomCenter.x;
-        state.targetZoomCenter.y = savedState.targetZoomCenter.y;
-        state.zoomSize = savedState.zoomSize;
-        state.targetZoomSize = savedState.targetZoomSize;
-        state.maxIterations = savedState.maxIterations;
-        state.paletteId = savedState.paletteId;
-        state.fractalType = savedState.fractalType;
-        state.juliaC.x = savedState.juliaC.x;
-        state.juliaC.y = savedState.juliaC.y;
-        
-        // Resume main rendering
-        isVideoRendering = false;
     };
 
     try {
@@ -2781,20 +2720,13 @@ async function renderVideoJourney(settings) {
         });
 
         // Configure VideoEncoder with real progress tracking
-        // Throttle UI updates on mobile to reduce stuttering
-        let lastEncodingUIUpdate = 0;
-        const encodingUIUpdateInterval = isMobileDevice ? 30 : 10; // Mobile: update every 30 chunks, Desktop: every 10
-        
         const videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
                 muxer.addVideoChunk(chunk, meta);
                 encodedChunks++;
-                // Update encoding progress - throttled on mobile
-                if (encodedChunks - lastEncodingUIUpdate >= encodingUIUpdateInterval || encodedChunks === totalFrames) {
-                    const encodePercent = (encodedChunks / totalFrames) * 100;
-                    updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames} chunks`);
-                    lastEncodingUIUpdate = encodedChunks;
-                }
+                // Update encoding progress in real-time
+                const encodePercent = (encodedChunks / totalFrames) * 100;
+                updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames} chunks`);
             },
             error: (e) => {
                 console.error('VideoEncoder error:', e);
@@ -2826,23 +2758,16 @@ async function renderVideoJourney(settings) {
         const logEnd = Math.log(targetSize);
 
         // Rendering loop - real progress tracking
-        // On mobile, update UI less frequently to reduce stuttering
-        const uiUpdateInterval = isMobileDevice ? Math.max(1, Math.floor(fps)) : Math.max(1, Math.floor(fps / 4)); // Mobile: every 1 second, Desktop: every 0.25 seconds
-        const yieldInterval = isMobileDevice ? Math.max(1, Math.floor(fps / 2)) : Math.max(1, Math.floor(fps / 4)); // Mobile: yield every 0.5s, Desktop: every 0.25s
-        const yieldDuration = isMobileDevice ? 16 : 0; // Mobile: 16ms yield (one frame), Desktop: immediate
-        
         for (let i = 0; i < totalFrames; i++) {
             // Calculate REAL progress based on actual frames rendered
             const framePercent = ((i + 1) / totalFrames) * 100;
             
-            // Update progress UI less frequently on mobile to reduce DOM overhead
-            if (i % uiUpdateInterval === 0 || i === totalFrames - 1) {
-                updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
-            }
+            // Update progress on every frame for accuracy, but yield less frequently for performance
+            updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
             
-            // Yield to UI thread periodically - longer yield on mobile for GPU breathing room
-            if (i % yieldInterval === 0) {
-                await new Promise(r => setTimeout(r, yieldDuration));
+            // Yield to UI thread periodically to allow progress bar updates
+            if (i % Math.max(1, Math.floor(fps / 4)) === 0) {
+                await new Promise(r => setTimeout(r, 0));
             }
 
             const t = i / (totalFrames - 1);
@@ -2875,9 +2800,7 @@ async function renderVideoJourney(settings) {
             offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
             offGl.uniform2f(offProgramInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
 
-            // On mobile, cap iterations to reduce GPU load during video rendering
-            const videoMaxIterations = isMobileDevice ? Math.min(state.maxIterations, 500) : state.maxIterations;
-            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, videoMaxIterations);
+            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, state.maxIterations);
             offGl.uniform1i(offProgramInfo.uniformLocations.paletteId, state.paletteId);
             offGl.uniform1i(offProgramInfo.uniformLocations.fractalType, state.fractalType);
             offGl.uniform2f(offProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
@@ -2934,7 +2857,13 @@ async function renderVideoJourney(settings) {
 
         if (loadingStatus) loadingStatus.textContent = 'Complete!';
         
-        // Cleanup WebGL context FIRST to free memory
+        setTimeout(() => {
+            loadingOverlay.classList.add('hidden');
+            resetOverlay();
+            showToast(`Video exported at ${width}×${height} ${fps}fps`);
+        }, 1000);
+
+        // Cleanup WebGL context
         try {
             const loseContext = offGl.getExtension('WEBGL_lose_context');
             if (loseContext) loseContext.loseContext();
@@ -2942,22 +2871,12 @@ async function renderVideoJourney(settings) {
             // Ignore cleanup errors
         }
 
-        setTimeout(() => {
-            loadingOverlay.classList.add('hidden');
-            resetOverlay();
-            // Resume main rendering AFTER cleanup - this restores user to their exact location
-            resumeMainRendering();
-            showToast(`Video exported at ${width}×${height} ${fps}fps`);
-        }, 1000);
-
     } catch (err) {
         console.error('Video rendering error:', err);
         if (loadingStatus) loadingStatus.textContent = 'Error: ' + err.message;
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
             resetOverlay();
-            // Resume main rendering even on error
-            resumeMainRendering();
             alert('Video rendering failed: ' + err.message);
         }, 2000);
     }
