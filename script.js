@@ -2607,6 +2607,10 @@ function initVideoSettingsModal() {
 async function renderVideoJourney(settings) {
     const { width, height, fps, duration } = settings;
     const totalFrames = Math.round(duration * fps);
+    
+    // Detect mobile for performance optimizations
+    const screenCtx = getScreenContext();
+    const isMobileDevice = screenCtx.isMobile;
 
     // Save current state BEFORE pausing main render
     // This captures the exact location where user pressed render
@@ -2777,13 +2781,20 @@ async function renderVideoJourney(settings) {
         });
 
         // Configure VideoEncoder with real progress tracking
+        // Throttle UI updates on mobile to reduce stuttering
+        let lastEncodingUIUpdate = 0;
+        const encodingUIUpdateInterval = isMobileDevice ? 30 : 10; // Mobile: update every 30 chunks, Desktop: every 10
+        
         const videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
                 muxer.addVideoChunk(chunk, meta);
                 encodedChunks++;
-                // Update encoding progress in real-time
-                const encodePercent = (encodedChunks / totalFrames) * 100;
-                updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames} chunks`);
+                // Update encoding progress - throttled on mobile
+                if (encodedChunks - lastEncodingUIUpdate >= encodingUIUpdateInterval || encodedChunks === totalFrames) {
+                    const encodePercent = (encodedChunks / totalFrames) * 100;
+                    updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames} chunks`);
+                    lastEncodingUIUpdate = encodedChunks;
+                }
             },
             error: (e) => {
                 console.error('VideoEncoder error:', e);
@@ -2815,16 +2826,23 @@ async function renderVideoJourney(settings) {
         const logEnd = Math.log(targetSize);
 
         // Rendering loop - real progress tracking
+        // On mobile, update UI less frequently to reduce stuttering
+        const uiUpdateInterval = isMobileDevice ? Math.max(1, Math.floor(fps)) : Math.max(1, Math.floor(fps / 4)); // Mobile: every 1 second, Desktop: every 0.25 seconds
+        const yieldInterval = isMobileDevice ? Math.max(1, Math.floor(fps / 2)) : Math.max(1, Math.floor(fps / 4)); // Mobile: yield every 0.5s, Desktop: every 0.25s
+        const yieldDuration = isMobileDevice ? 16 : 0; // Mobile: 16ms yield (one frame), Desktop: immediate
+        
         for (let i = 0; i < totalFrames; i++) {
             // Calculate REAL progress based on actual frames rendered
             const framePercent = ((i + 1) / totalFrames) * 100;
             
-            // Update progress on every frame for accuracy, but yield less frequently for performance
-            updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
+            // Update progress UI less frequently on mobile to reduce DOM overhead
+            if (i % uiUpdateInterval === 0 || i === totalFrames - 1) {
+                updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
+            }
             
-            // Yield to UI thread periodically to allow progress bar updates
-            if (i % Math.max(1, Math.floor(fps / 4)) === 0) {
-                await new Promise(r => setTimeout(r, 0));
+            // Yield to UI thread periodically - longer yield on mobile for GPU breathing room
+            if (i % yieldInterval === 0) {
+                await new Promise(r => setTimeout(r, yieldDuration));
             }
 
             const t = i / (totalFrames - 1);
@@ -2857,7 +2875,9 @@ async function renderVideoJourney(settings) {
             offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
             offGl.uniform2f(offProgramInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
 
-            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, state.maxIterations);
+            // On mobile, cap iterations to reduce GPU load during video rendering
+            const videoMaxIterations = isMobileDevice ? Math.min(state.maxIterations, 500) : state.maxIterations;
+            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, videoMaxIterations);
             offGl.uniform1i(offProgramInfo.uniformLocations.paletteId, state.paletteId);
             offGl.uniform1i(offProgramInfo.uniformLocations.fractalType, state.fractalType);
             offGl.uniform2f(offProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
