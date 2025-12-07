@@ -2602,11 +2602,8 @@ async function renderVideoJourney(settings) {
     const batchSize = isMobile ? 1 : (isLowPowerDevice ? 2 : 4);
     // Yield time: longer on mobile to prevent thermal throttling
     const yieldTime = isMobile ? 16 : (isLowPowerDevice ? 8 : 0);
-    // Use full iterations for quality - don't cap (user chose these for a reason)
-    // Only slightly reduce on mobile to prevent overheating
-    const videoIterations = isMobile ?
-        Math.min(state.maxIterations, Math.max(state.maxIterations * 0.8, 200)) :
-        state.maxIterations;
+    // Use FULL iterations - quality must match live display
+    const videoIterations = state.maxIterations;
 
     // Show loading overlay with dual progress bars
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
@@ -2892,9 +2889,10 @@ async function renderVideoJourney(settings) {
             offGl.uniform1i(offProgramInfo.uniformLocations.fractalType, state.fractalType);
             offGl.uniform2f(offProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
 
-            // === DISABLE HIGH PRECISION ON MOBILE FOR PERFORMANCE ===
-            // High precision is expensive and often not needed for video
-            const useHighPrecision = !isMobile && currentZoomSize < 0.001 && state.fractalType < 2;
+            // === HIGH PRECISION FOR DEEP ZOOMS ===
+            // Must match live display behavior - without this, deep zooms pixelate
+            // High precision kicks in at zoomSize < 0.001 (~1000x zoom)
+            const useHighPrecision = currentZoomSize < 0.001 && state.fractalType < 2;
             offGl.uniform1i(offProgramInfo.uniformLocations.highPrecision, useHighPrecision ? 1 : 0);
 
             offGl.activeTexture(offGl.TEXTURE0);
