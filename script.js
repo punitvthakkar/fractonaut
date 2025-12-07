@@ -2778,6 +2778,14 @@ async function renderVideoJourney(settings) {
         // Pixel buffer for reading framebuffer (reuse across frames)
         const pixelBuffer = new Uint8Array(width * height * 4);
 
+        // === 2D CANVAS FOR VIDEOFRAME COMPATIBILITY ===
+        // VideoFrame doesn't accept ImageData directly in all browsers
+        // We use a 2D canvas as intermediary: readPixels → ImageData → 2D canvas → VideoFrame
+        const transferCanvas = document.createElement('canvas');
+        transferCanvas.width = width;
+        transferCanvas.height = height;
+        const transferCtx = transferCanvas.getContext('2d', { willReadFrequently: false });
+
         // Track encoding progress
         let encodedChunks = 0;
 
@@ -2903,7 +2911,7 @@ async function renderVideoJourney(settings) {
             // Read pixels from framebuffer
             gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixelBuffer);
 
-            // Flip Y (WebGL is bottom-up, ImageData is top-down)
+            // Flip Y (WebGL is bottom-up, canvas is top-down)
             const flippedPixels = new Uint8ClampedArray(width * height * 4);
             for (let y = 0; y < height; y++) {
                 const srcRow = (height - 1 - y) * width * 4;
@@ -2911,9 +2919,12 @@ async function renderVideoJourney(settings) {
                 flippedPixels.set(pixelBuffer.subarray(srcRow, srcRow + width * 4), dstRow);
             }
 
-            // Create VideoFrame from ImageData
+            // Draw to 2D canvas (VideoFrame accepts canvas, not ImageData)
             const imageData = new ImageData(flippedPixels, width, height);
-            const frame = new VideoFrame(imageData, {
+            transferCtx.putImageData(imageData, 0, 0);
+
+            // Create VideoFrame from 2D canvas
+            const frame = new VideoFrame(transferCanvas, {
                 timestamp: i * frameDuration,
                 duration: frameDuration
             });
@@ -2994,6 +3005,11 @@ async function renderVideoJourney(settings) {
             }
             // Restore default framebuffer
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            // Clear transfer canvas
+            if (typeof transferCanvas !== 'undefined' && transferCanvas) {
+                transferCanvas.width = 0;
+                transferCanvas.height = 0;
+            }
         } catch (e) {
             console.warn('Cleanup error (ignored):', e);
         }
