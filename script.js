@@ -357,6 +357,73 @@ let state = {
     lastFpsTime: 0
 };
 
+// === RENDER LOOP CONTROL ===
+let mainRenderRAF = null; // Track main render loop for pause/resume
+let isExporting = false;  // Flag to prevent render during export
+
+// === STATE PERSISTENCE FOR VIDEO EXPORT ===
+const EXPORT_STATE_KEY = 'fractonaut_export_state';
+
+function saveStateForExport() {
+    const exportState = {
+        zoomCenter: { ...state.zoomCenter },
+        targetZoomCenter: { ...state.targetZoomCenter },
+        zoomSize: state.zoomSize,
+        targetZoomSize: state.targetZoomSize,
+        maxIterations: state.maxIterations,
+        paletteId: state.paletteId,
+        fractalType: state.fractalType,
+        juliaC: { ...state.juliaC },
+        velocity: { ...state.velocity }
+    };
+    try {
+        localStorage.setItem(EXPORT_STATE_KEY, JSON.stringify(exportState));
+        return true;
+    } catch (e) {
+        console.warn('Failed to save export state:', e);
+        return false;
+    }
+}
+
+function restoreStateFromExport() {
+    try {
+        const saved = localStorage.getItem(EXPORT_STATE_KEY);
+        if (saved) {
+            const exportState = JSON.parse(saved);
+            state.zoomCenter = exportState.zoomCenter;
+            state.targetZoomCenter = exportState.targetZoomCenter;
+            state.zoomSize = exportState.zoomSize;
+            state.targetZoomSize = exportState.targetZoomSize;
+            state.maxIterations = exportState.maxIterations;
+            state.paletteId = exportState.paletteId;
+            state.fractalType = exportState.fractalType;
+            state.juliaC = exportState.juliaC;
+            state.velocity = exportState.velocity;
+            localStorage.removeItem(EXPORT_STATE_KEY); // Clean up
+            return true;
+        }
+    } catch (e) {
+        console.warn('Failed to restore export state:', e);
+    }
+    return false;
+}
+
+function pauseMainRender() {
+    isExporting = true;
+    if (mainRenderRAF) {
+        cancelAnimationFrame(mainRenderRAF);
+        mainRenderRAF = null;
+    }
+}
+
+function resumeMainRender() {
+    isExporting = false;
+    if (!mainRenderRAF) {
+        lastTime = 0; // Reset timing
+        mainRenderRAF = requestAnimationFrame(drawScene);
+    }
+}
+
 const locations = {
     0: [ // Mandelbrot
         {
@@ -737,7 +804,11 @@ function drawScene(timestamp) {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     updateStats();
-    requestAnimationFrame(drawScene);
+
+    // Track RAF ID for pause/resume during video export
+    if (!isExporting) {
+        mainRenderRAF = requestAnimationFrame(drawScene);
+    }
 }
 
 function resizeCanvasToDisplaySize(canvas) {
@@ -2476,8 +2547,8 @@ fractalCards.forEach(card => {
     });
 });
 
-// Start rendering
-requestAnimationFrame(drawScene);
+// Start rendering - track RAF ID for pause/resume during export
+mainRenderRAF = requestAnimationFrame(drawScene);
 
 // --- Video Export Logic ---
 function initVideoSettingsModal() {
@@ -2596,6 +2667,12 @@ async function renderVideoJourney(settings) {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                      (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
     const isLowPowerDevice = navigator.hardwareConcurrency ? navigator.hardwareConcurrency <= 4 : isMobile;
+
+    // === RESOURCE OPTIMIZATION: PAUSE MAIN RENDER ===
+    // Save state to localStorage and pause main render loop
+    // This frees up GPU resources for video export (especially important on mobile)
+    saveStateForExport();
+    pauseMainRender();
 
     // === ADAPTIVE SETTINGS FOR MOBILE ===
     // Batch size: how many frames to render before yielding to UI
@@ -2979,6 +3056,10 @@ async function renderVideoJourney(settings) {
 
         if (loadingStatus) loadingStatus.textContent = 'Complete!';
 
+        // === CLEANUP AND RESTORE ===
+        cleanupResources();
+        restoreAndResume();
+
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
             resetOverlay();
@@ -2986,15 +3067,13 @@ async function renderVideoJourney(settings) {
             showToast(`Video exported: ${width}×${height} ${fps}fps @ ${bitrateStr} Mbps`);
         }, 1000);
 
-        // === THOROUGH CLEANUP ===
-        cleanupResources();
-
     } catch (err) {
         console.error('Video rendering error:', err);
         if (loadingStatus) loadingStatus.textContent = 'Error: ' + err.message;
 
-        // Cleanup on error to prevent memory leaks
+        // === CLEANUP AND RESTORE ON ERROR ===
         cleanupResources();
+        restoreAndResume();
 
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
@@ -3026,6 +3105,12 @@ async function renderVideoJourney(settings) {
         } catch (e) {
             console.warn('Cleanup error (ignored):', e);
         }
+    }
+
+    // Restore state and resume main render loop
+    function restoreAndResume() {
+        restoreStateFromExport();
+        resumeMainRender();
     }
 }
 
