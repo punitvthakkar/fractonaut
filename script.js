@@ -2675,21 +2675,16 @@ async function renderVideoJourney(settings) {
     pauseMainRender();
 
     // === ADAPTIVE SETTINGS FOR MOBILE ===
-    // Batch size: how many frames to render before yielding to UI
     const batchSize = isMobile ? 1 : (isLowPowerDevice ? 2 : 4);
-    // Yield time: longer on mobile to prevent thermal throttling
     const yieldTime = isMobile ? 16 : (isLowPowerDevice ? 8 : 0);
-    // Use FULL iterations - quality must match live display
     const videoIterations = state.maxIterations;
 
-    // Show loading overlay with dual progress bars
+    // UI elements
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
     const loadingTitle = document.getElementById('exportLoadingTitle');
     const singleProgressContainer = document.getElementById('singleProgressContainer');
     const dualProgressContainer = document.getElementById('dualProgressContainer');
     const loadingStatus = document.getElementById('loadingStatus');
-
-    // Dual progress elements
     const frameProgressBar = document.getElementById('frameProgressBar');
     const frameProgressPercent = document.getElementById('frameProgressPercent');
     const frameProgressDetail = document.getElementById('frameProgressDetail');
@@ -2697,7 +2692,6 @@ async function renderVideoJourney(settings) {
     const videoProgressPercent = document.getElementById('videoProgressPercent');
     const videoProgressDetail = document.getElementById('videoProgressDetail');
 
-    // Setup for video export (dual progress)
     if (loadingTitle) loadingTitle.textContent = isMobile ? 'Rendering Video (Mobile)' : 'Rendering Video';
     if (singleProgressContainer) singleProgressContainer.classList.add('hidden');
     if (dualProgressContainer) dualProgressContainer.classList.remove('hidden');
@@ -2723,24 +2717,27 @@ async function renderVideoJourney(settings) {
         updateVideoProgress(0, 'Waiting...');
     };
 
-    // === NON-BLOCKING YIELD FUNCTION ===
     const yieldToMain = () => new Promise(resolve => {
         if (yieldTime > 0) {
             setTimeout(resolve, yieldTime);
         } else {
-            // Use requestAnimationFrame for smoother yielding on desktop
             requestAnimationFrame(() => resolve());
         }
     });
 
+    // Resources for cleanup
+    let framebuffer = null;
+    let renderTexture = null;
+    let videoEncoder = null;
+
     try {
         updateFrameProgress(0, 'Initializing...');
         updateVideoProgress(0, 'Waiting for frames...');
-        if (loadingStatus) loadingStatus.textContent = isMobile ? 'Setting up (optimized for mobile)...' : 'Setting up...';
+        if (loadingStatus) loadingStatus.textContent = 'Setting up (GPU-optimized)...';
 
         // Check VideoEncoder support
         if (typeof VideoEncoder === 'undefined') {
-            throw new Error('VideoEncoder not supported in this browser. Please use Chrome, Edge, or another modern browser.');
+            throw new Error('VideoEncoder not supported in this browser.');
         }
 
         // Dynamic import mp4-muxer
@@ -2749,149 +2746,81 @@ async function renderVideoJourney(settings) {
             const module = await import('https://unpkg.com/mp4-muxer@5.2.2/build/mp4-muxer.mjs');
             Mp4Muxer = module;
         } catch (e) {
-            throw new Error('Failed to load video muxer library. Please check your internet connection.');
+            throw new Error('Failed to load video muxer library.');
         }
 
-        // Create offscreen canvas
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = width;
-        offCanvas.height = height;
-        const offGl = offCanvas.getContext('webgl2', {
-            preserveDrawingBuffer: true,
-            alpha: false,
-            antialias: false,
-            depth: false,
-            stencil: false,
-            powerPreference: 'default' // Let browser decide, avoid GPU conflicts
-        });
+        // === GPU-FIRST PHILOSOPHY: REUSE EXISTING WEBGL CONTEXT ===
+        // Instead of creating a new context, use framebuffer rendering
+        // This eliminates: duplicate shader compilation, texture upload, context creation
 
-        if (!offGl) throw new Error('Failed to create offscreen WebGL context');
+        // Create framebuffer for offscreen rendering at export resolution
+        framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
 
-        // Setup Shader on offscreen canvas
-        const offProgram = initShaderProgram(offGl, vsSource, fsSource);
-        if (!offProgram) throw new Error('Failed to initialize shader program');
+        // Create texture to render into
+        renderTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, renderTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-        const offProgramInfo = {
-            program: offProgram,
-            attribLocations: {
-                vertexPosition: offGl.getAttribLocation(offProgram, 'aVertexPosition'),
-            },
-            uniformLocations: {
-                resolution: offGl.getUniformLocation(offProgram, 'u_resolution'),
-                zoomCenterX: offGl.getUniformLocation(offProgram, 'u_zoomCenter_x'),
-                zoomCenterY: offGl.getUniformLocation(offProgram, 'u_zoomCenter_y'),
-                zoomSize: offGl.getUniformLocation(offProgram, 'u_zoomSize'),
-                maxIterations: offGl.getUniformLocation(offProgram, 'u_maxIterations'),
-                paletteId: offGl.getUniformLocation(offProgram, 'u_paletteId'),
-                highPrecision: offGl.getUniformLocation(offProgram, 'u_highPrecision'),
-                paletteTexture: offGl.getUniformLocation(offProgram, 'u_paletteTexture'),
-                fractalType: offGl.getUniformLocation(offProgram, 'u_fractalType'),
-                juliaC: offGl.getUniformLocation(offProgram, 'u_juliaC'),
-            },
-        };
+        // Attach texture to framebuffer
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, renderTexture, 0);
 
-        // Buffers for offscreen
-        const offPositionBuffer = offGl.createBuffer();
-        offGl.bindBuffer(offGl.ARRAY_BUFFER, offPositionBuffer);
-        const positions = [-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0];
-        offGl.bufferData(offGl.ARRAY_BUFFER, new Float32Array(positions), offGl.STATIC_DRAW);
+        // Verify framebuffer is complete
+        const fbStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (fbStatus !== gl.FRAMEBUFFER_COMPLETE) {
+            throw new Error('Framebuffer not complete: ' + fbStatus);
+        }
 
-        // Palette texture for offscreen
-        const offPaletteTexture = offGl.createTexture();
-        offGl.bindTexture(offGl.TEXTURE_2D, offPaletteTexture);
-        offGl.texImage2D(offGl.TEXTURE_2D, 0, offGl.RGBA, 2048, 1, 0, offGl.RGBA, offGl.UNSIGNED_BYTE, textureData);
-        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_WRAP_S, offGl.REPEAT);
-        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_WRAP_T, offGl.REPEAT);
-        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_MIN_FILTER, offGl.LINEAR);
-        offGl.texParameteri(offGl.TEXTURE_2D, offGl.TEXTURE_MAG_FILTER, offGl.LINEAR);
+        // Pixel buffer for reading framebuffer (reuse across frames)
+        const pixelBuffer = new Uint8Array(width * height * 4);
 
-        // Track actual encoding progress
+        // Track encoding progress
         let encodedChunks = 0;
 
         // Configure Muxer
         const muxer = new Mp4Muxer.Muxer({
             target: new Mp4Muxer.ArrayBufferTarget(),
-            video: {
-                codec: 'avc',
-                width: width,
-                height: height,
-            },
+            video: { codec: 'avc', width, height },
             fastStart: 'in-memory'
         });
 
-        // Configure VideoEncoder with real progress tracking
-        const videoEncoder = new VideoEncoder({
+        // Configure VideoEncoder
+        videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
                 muxer.addVideoChunk(chunk, meta);
                 encodedChunks++;
-                // Update encoding progress in real-time
                 const encodePercent = (encodedChunks / totalFrames) * 100;
-                updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames} chunks`);
+                updateVideoProgress(encodePercent, `Encoded ${encodedChunks} of ${totalFrames}`);
             },
-            error: (e) => {
-                console.error('VideoEncoder error:', e);
-                throw new Error('Video encoding error: ' + e.message);
-            }
+            error: (e) => { throw new Error('Encoding error: ' + e.message); }
         });
 
-        // === OPTIMIZED H.264 CODEC SELECTION ===
-        // High Profile Level 5.1 for 1080p60 - excellent compression with high quality
-        // Using constrained high profile for better mobile hardware decoder compatibility
-        let codecString;
-        if (height <= 720) {
-            // 720p: High Profile Level 3.1 - great balance
-            codecString = 'avc1.64001f';
-        } else if (fps <= 30) {
-            // 1080p30: High Profile Level 4.0
-            codecString = 'avc1.640028';
-        } else {
-            // 1080p60: High Profile Level 4.2 (better than 5.1 for mobile decode)
-            codecString = 'avc1.64002a';
-        }
+        // Codec selection
+        let codecString = height <= 720 ? 'avc1.64001f' : (fps <= 30 ? 'avc1.640028' : 'avc1.64002a');
 
-        // === OPTIMIZED BITRATE CALCULATION ===
-        // Target: High quality with good compression, NO graining
-        // Fractal content has high detail - needs higher bitrate than typical video
-        // 1080p60: 12-15 Mbps, 1080p30: 8-10 Mbps, 720p: 5-6 Mbps
-        const pixels = width * height;
-        const pixelRate = pixels * fps;
-
-        let bitrate;
-        if (isMobile) {
-            // Mobile: Still good quality but more conservative
-            // 1080p60: ~10 Mbps, 1080p30: ~6 Mbps, 720p: ~4 Mbps
-            bitrate = Math.round(pixelRate * 0.08);
-        } else {
-            // Desktop: High quality for detailed fractal content
-            // 1080p60: ~15 Mbps, 1080p30: ~10 Mbps, 720p: ~6 Mbps
-            bitrate = Math.round(pixelRate * 0.12);
-        }
-
-        // Clamp bitrate to reasonable bounds (higher ceiling for quality)
+        // Bitrate calculation
+        const pixelRate = width * height * fps;
+        let bitrate = Math.round(pixelRate * (isMobile ? 0.08 : 0.12));
         bitrate = Math.max(4_000_000, Math.min(bitrate, 20_000_000));
 
-        // === ENCODER CONFIGURATION WITH QUALITY OPTIMIZATIONS ===
         const encoderConfig = {
             codec: codecString,
-            width: width,
-            height: height,
-            bitrate: bitrate,
+            width, height, bitrate,
             framerate: fps,
-            // Quality-focused settings
-            latencyMode: 'quality', // Prioritize quality over encoding speed
-            bitrateMode: 'variable', // VBR - better quality for varying complexity (fractals)
+            latencyMode: 'quality',
+            bitrateMode: 'variable'
         };
 
-        // Add hardware acceleration preference if supported
         if ('hardwareAcceleration' in VideoEncoder) {
             encoderConfig.hardwareAcceleration = 'prefer-hardware';
         }
 
-        // Check codec support before configuring
         const codecSupport = await VideoEncoder.isConfigSupported(encoderConfig);
         if (!codecSupport.supported) {
-            // Fallback to baseline profile if high profile not supported
-            console.warn('High profile not supported, falling back to baseline');
             encoderConfig.codec = 'avc1.42001f';
         }
 
@@ -2899,153 +2828,124 @@ async function renderVideoJourney(settings) {
 
         if (loadingStatus) {
             const bitrateStr = (bitrate / 1_000_000).toFixed(1);
-            loadingStatus.textContent = isMobile ?
-                `Rendering (${bitrateStr} Mbps, optimized)...` :
-                `Rendering frames (${bitrateStr} Mbps)...`;
+            loadingStatus.textContent = `Rendering (${bitrateStr} Mbps, GPU-optimized)...`;
         }
 
-        // Get journey parameters - from z=1x to current zoom
-        const startSize = 3.0; // z = 1x
-        const targetSize = state.zoomSize; // Current view size is the target
+        // Journey parameters
+        const startSize = 3.0;
+        const targetSize = state.zoomSize;
         const targetX = state.zoomCenter.x;
         const targetY = state.zoomCenter.y;
-
         const logStart = Math.log(startSize);
         const logEnd = Math.log(targetSize);
-
-        // === PRE-CALCULATE FRAME DATA FOR SMOOTHER ENCODING ===
-        // This reduces per-frame computation overhead
         const frameDuration = Math.round(1000000 / fps);
-        const keyframeInterval = fps * 2; // Keyframe every 2 seconds
+        const keyframeInterval = fps * 2;
 
         // === OPTIMIZED RENDERING LOOP ===
-        // Render in batches with aggressive yielding for mobile responsiveness
+        // Uses existing shader program, position buffer, and palette texture
         for (let i = 0; i < totalFrames; i++) {
             const framePercent = ((i + 1) / totalFrames) * 100;
             updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
 
-            // === AGGRESSIVE YIELDING FOR MOBILE ===
-            // Yield after each batch to prevent UI freeze
             if (i % batchSize === 0) {
                 await yieldToMain();
             }
 
             const t = totalFrames > 1 ? i / (totalFrames - 1) : 0;
-            // Smooth easing (same as flythrough)
             const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-            // Interpolate zoom logarithmically
             const currentLog = logStart + (logEnd - logStart) * ease;
             const currentZoomSize = Math.exp(currentLog);
 
-            // Render frame
-            offGl.viewport(0, 0, width, height);
-            offGl.clearColor(0.0, 0.0, 0.0, 1.0);
-            offGl.clear(offGl.COLOR_BUFFER_BIT);
+            // === RENDER TO FRAMEBUFFER (REUSING EXISTING RESOURCES) ===
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.viewport(0, 0, width, height);
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
 
-            offGl.useProgram(offProgramInfo.program);
+            // Use EXISTING shader program (no recompilation!)
+            gl.useProgram(programInfo.program);
 
-            offGl.bindBuffer(offGl.ARRAY_BUFFER, offPositionBuffer);
-            offGl.vertexAttribPointer(offProgramInfo.attribLocations.vertexPosition, 2, offGl.FLOAT, false, 0, 0);
-            offGl.enableVertexAttribArray(offProgramInfo.attribLocations.vertexPosition);
+            // Use EXISTING position buffer
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
 
-            // Set uniforms
-            offGl.uniform2f(offProgramInfo.uniformLocations.resolution, width, height);
+            // Set uniforms (minimal CPU-GPU communication)
+            gl.uniform2f(programInfo.uniformLocations.resolution, width, height);
 
             const centerXSplit = splitDouble(targetX);
             const centerYSplit = splitDouble(targetY);
             const zoomSizeSplit = splitDouble(currentZoomSize);
 
-            offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterX, centerXSplit[0], centerXSplit[1]);
-            offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
-            offGl.uniform2f(offProgramInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
+            gl.uniform2f(programInfo.uniformLocations.zoomCenterX, centerXSplit[0], centerXSplit[1]);
+            gl.uniform2f(programInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
+            gl.uniform2f(programInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
 
-            // === USE REDUCED ITERATIONS FOR VIDEO EXPORT ===
-            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, videoIterations);
-            offGl.uniform1i(offProgramInfo.uniformLocations.paletteId, state.paletteId);
-            offGl.uniform1i(offProgramInfo.uniformLocations.fractalType, state.fractalType);
-            offGl.uniform2f(offProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
+            gl.uniform1i(programInfo.uniformLocations.maxIterations, videoIterations);
+            gl.uniform1i(programInfo.uniformLocations.paletteId, state.paletteId);
+            gl.uniform1i(programInfo.uniformLocations.fractalType, state.fractalType);
+            gl.uniform2f(programInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
 
-            // === HIGH PRECISION FOR DEEP ZOOMS ===
-            // Must match live display behavior - without this, deep zooms pixelate
-            // High precision kicks in at zoomSize < 0.001 (~1000x zoom)
             const useHighPrecision = currentZoomSize < 0.001 && state.fractalType < 2;
-            offGl.uniform1i(offProgramInfo.uniformLocations.highPrecision, useHighPrecision ? 1 : 0);
+            gl.uniform1i(programInfo.uniformLocations.highPrecision, useHighPrecision ? 1 : 0);
 
-            offGl.activeTexture(offGl.TEXTURE0);
-            offGl.bindTexture(offGl.TEXTURE_2D, offPaletteTexture);
-            offGl.uniform1i(offProgramInfo.uniformLocations.paletteTexture, 0);
+            // Use EXISTING palette texture
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, paletteTexture);
+            gl.uniform1i(programInfo.uniformLocations.paletteTexture, 0);
 
-            offGl.drawArrays(offGl.TRIANGLE_STRIP, 0, 4);
+            // SINGLE DRAW CALL (following GPU-first philosophy)
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-            // === CRITICAL: ENSURE GL COMMANDS ARE COMPLETE ===
-            // Must call finish() before VideoFrame reads the canvas
-            // Without this, VideoFrame may read incomplete/empty frame
-            offGl.finish();
+            // Ensure GPU commands complete
+            gl.finish();
 
-            // === ENCODE FRAME WITH ERROR HANDLING ===
-            let frame;
-            try {
-                frame = new VideoFrame(offCanvas, {
-                    timestamp: i * frameDuration,
-                    duration: frameDuration
-                });
-            } catch (frameError) {
-                console.error(`Failed to create VideoFrame ${i}:`, frameError);
-                // Try alternative: read pixels to ImageData first
-                const pixels = new Uint8ClampedArray(width * height * 4);
-                offGl.readPixels(0, 0, width, height, offGl.RGBA, offGl.UNSIGNED_BYTE, pixels);
+            // Read pixels from framebuffer
+            gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixelBuffer);
 
-                // Flip Y (WebGL is bottom-up, ImageData is top-down)
-                const flipped = new Uint8ClampedArray(width * height * 4);
-                for (let y = 0; y < height; y++) {
-                    const srcRow = (height - 1 - y) * width * 4;
-                    const dstRow = y * width * 4;
-                    flipped.set(pixels.subarray(srcRow, srcRow + width * 4), dstRow);
-                }
-
-                const imageData = new ImageData(flipped, width, height);
-                frame = new VideoFrame(imageData, {
-                    timestamp: i * frameDuration,
-                    duration: frameDuration
-                });
+            // Flip Y (WebGL is bottom-up, ImageData is top-down)
+            const flippedPixels = new Uint8ClampedArray(width * height * 4);
+            for (let y = 0; y < height; y++) {
+                const srcRow = (height - 1 - y) * width * 4;
+                const dstRow = y * width * 4;
+                flippedPixels.set(pixelBuffer.subarray(srcRow, srcRow + width * 4), dstRow);
             }
 
-            // Keyframe every 2 seconds for good seeking
+            // Create VideoFrame from ImageData
+            const imageData = new ImageData(flippedPixels, width, height);
+            const frame = new VideoFrame(imageData, {
+                timestamp: i * frameDuration,
+                duration: frameDuration
+            });
+
             const keyFrame = i % keyframeInterval === 0;
-
             videoEncoder.encode(frame, { keyFrame });
-            frame.close(); // Immediately release frame memory
+            frame.close();
 
-            // === ENCODER BACKPRESSURE FOR ALL DEVICES ===
-            // Prevent encoder queue from growing too large (causes memory exhaustion)
-            // This is critical - without it, Mac crashed after 1500 frames
+            // Encoder backpressure
             const maxQueueSize = isMobile ? 3 : 10;
             while (videoEncoder.encodeQueueSize > maxQueueSize) {
-                // Wait for encoder to process some frames
                 await new Promise(resolve => setTimeout(resolve, 10));
             }
         }
 
-        // Frame rendering complete
+        // Restore framebuffer to default (screen)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
         updateFrameProgress(100, 'All frames rendered!');
         if (loadingStatus) loadingStatus.textContent = 'Encoding video...';
 
-        // Flush encoder - encoding progress is tracked via the output callback above
         await videoEncoder.flush();
 
-        // Encoding complete
         updateVideoProgress(100, 'All chunks encoded!');
         if (loadingStatus) loadingStatus.textContent = 'Finalizing...';
 
-        // Finalize muxer
         muxer.finalize();
 
         const { buffer } = muxer.target;
         const blob = new Blob([buffer], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
 
-        // Download
         const a = document.createElement('a');
         a.href = url;
         a.download = `fractonaut_journey_${width}x${height}_${fps}fps_${Date.now()}.mp4`;
@@ -3056,7 +2956,6 @@ async function renderVideoJourney(settings) {
 
         if (loadingStatus) loadingStatus.textContent = 'Complete!';
 
-        // === CLEANUP AND RESTORE ===
         cleanupResources();
         restoreAndResume();
 
@@ -3071,7 +2970,6 @@ async function renderVideoJourney(settings) {
         console.error('Video rendering error:', err);
         if (loadingStatus) loadingStatus.textContent = 'Error: ' + err.message;
 
-        // === CLEANUP AND RESTORE ON ERROR ===
         cleanupResources();
         restoreAndResume();
 
@@ -3082,32 +2980,25 @@ async function renderVideoJourney(settings) {
         }, 2000);
     }
 
-    // Cleanup helper function (defined in scope with access to resources)
     function cleanupResources() {
         try {
-            // Close encoder if it exists
-            if (typeof videoEncoder !== 'undefined' && videoEncoder) {
+            if (videoEncoder) {
                 try { videoEncoder.close(); } catch (e) { /* ignore */ }
             }
-            // Clean up WebGL resources
-            if (typeof offGl !== 'undefined' && offGl) {
-                try { offGl.deleteBuffer(offPositionBuffer); } catch (e) { /* ignore */ }
-                try { offGl.deleteTexture(offPaletteTexture); } catch (e) { /* ignore */ }
-                try { offGl.deleteProgram(offProgram); } catch (e) { /* ignore */ }
-                const loseContext = offGl.getExtension('WEBGL_lose_context');
-                if (loseContext) loseContext.loseContext();
+            // Clean up framebuffer resources
+            if (framebuffer) {
+                gl.deleteFramebuffer(framebuffer);
             }
-            // Clear canvas reference
-            if (typeof offCanvas !== 'undefined' && offCanvas) {
-                offCanvas.width = 0;
-                offCanvas.height = 0;
+            if (renderTexture) {
+                gl.deleteTexture(renderTexture);
             }
+            // Restore default framebuffer
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         } catch (e) {
             console.warn('Cleanup error (ignored):', e);
         }
     }
 
-    // Restore state and resume main render loop
     function restoreAndResume() {
         restoreStateFromExport();
         resumeMainRender();
