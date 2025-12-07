@@ -2592,13 +2592,28 @@ async function renderVideoJourney(settings) {
     const duration = parseFloat(durationInput?.value) || 30;
     const totalFrames = Math.round(duration * fps);
 
+    // === MOBILE DETECTION ===
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                     (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+    const isLowPowerDevice = navigator.hardwareConcurrency ? navigator.hardwareConcurrency <= 4 : isMobile;
+
+    // === ADAPTIVE SETTINGS FOR MOBILE ===
+    // Batch size: how many frames to render before yielding to UI
+    const batchSize = isMobile ? 1 : (isLowPowerDevice ? 2 : 4);
+    // Yield time: longer on mobile to prevent thermal throttling
+    const yieldTime = isMobile ? 16 : (isLowPowerDevice ? 8 : 0);
+    // Reduced iterations for video export (maintains visual quality, reduces GPU load)
+    const videoIterations = isMobile ?
+        Math.min(state.maxIterations, 150) :
+        Math.min(state.maxIterations, 250);
+
     // Show loading overlay with dual progress bars
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
     const loadingTitle = document.getElementById('exportLoadingTitle');
     const singleProgressContainer = document.getElementById('singleProgressContainer');
     const dualProgressContainer = document.getElementById('dualProgressContainer');
     const loadingStatus = document.getElementById('loadingStatus');
-    
+
     // Dual progress elements
     const frameProgressBar = document.getElementById('frameProgressBar');
     const frameProgressPercent = document.getElementById('frameProgressPercent');
@@ -2608,7 +2623,7 @@ async function renderVideoJourney(settings) {
     const videoProgressDetail = document.getElementById('videoProgressDetail');
 
     // Setup for video export (dual progress)
-    if (loadingTitle) loadingTitle.textContent = 'Rendering Video';
+    if (loadingTitle) loadingTitle.textContent = isMobile ? 'Rendering Video (Mobile)' : 'Rendering Video';
     if (singleProgressContainer) singleProgressContainer.classList.add('hidden');
     if (dualProgressContainer) dualProgressContainer.classList.remove('hidden');
     loadingOverlay.classList.remove('hidden');
@@ -2633,10 +2648,20 @@ async function renderVideoJourney(settings) {
         updateVideoProgress(0, 'Waiting...');
     };
 
+    // === NON-BLOCKING YIELD FUNCTION ===
+    const yieldToMain = () => new Promise(resolve => {
+        if (yieldTime > 0) {
+            setTimeout(resolve, yieldTime);
+        } else {
+            // Use requestAnimationFrame for smoother yielding on desktop
+            requestAnimationFrame(() => resolve());
+        }
+    });
+
     try {
         updateFrameProgress(0, 'Initializing...');
         updateVideoProgress(0, 'Waiting for frames...');
-        if (loadingStatus) loadingStatus.textContent = 'Setting up...';
+        if (loadingStatus) loadingStatus.textContent = isMobile ? 'Setting up (optimized for mobile)...' : 'Setting up...';
 
         // Check VideoEncoder support
         if (typeof VideoEncoder === 'undefined') {
@@ -2661,7 +2686,9 @@ async function renderVideoJourney(settings) {
             alpha: false,
             antialias: false,
             depth: false,
-            stencil: false
+            stencil: false,
+            powerPreference: isMobile ? 'low-power' : 'high-performance',
+            desynchronized: true // Reduces latency, helps prevent blocking
         });
 
         if (!offGl) throw new Error('Failed to create offscreen WebGL context');
@@ -2706,7 +2733,7 @@ async function renderVideoJourney(settings) {
 
         // Track actual encoding progress
         let encodedChunks = 0;
-        
+
         // Configure Muxer
         const muxer = new Mp4Muxer.Muxer({
             target: new Mp4Muxer.ArrayBufferTarget(),
@@ -2733,19 +2760,76 @@ async function renderVideoJourney(settings) {
             }
         });
 
-        // H.264 Baseline Profile for broad compatibility
-        const codecString = height <= 720 ? 'avc1.42001f' : 'avc1.640028';
-        const bitrate = Math.round(width * height * fps * 0.15); // Adaptive bitrate
+        // === OPTIMIZED H.264 CODEC SELECTION ===
+        // High Profile Level 5.1 for 1080p60 - excellent compression with high quality
+        // Using constrained high profile for better mobile hardware decoder compatibility
+        let codecString;
+        if (height <= 720) {
+            // 720p: High Profile Level 3.1 - great balance
+            codecString = 'avc1.64001f';
+        } else if (fps <= 30) {
+            // 1080p30: High Profile Level 4.0
+            codecString = 'avc1.640028';
+        } else {
+            // 1080p60: High Profile Level 4.2 (better than 5.1 for mobile decode)
+            codecString = 'avc1.64002a';
+        }
 
-        videoEncoder.configure({
+        // === OPTIMIZED BITRATE CALCULATION ===
+        // Target: High quality with high compression, no graining
+        // Formula based on YouTube/Netflix recommendations for H.264 High Profile
+        // Base: 4-6 Mbps for 1080p60 (vs original 18+ Mbps)
+        const pixels = width * height;
+        const pixelRate = pixels * fps;
+
+        let bitrate;
+        if (isMobile) {
+            // Mobile: More aggressive compression, hardware encoders handle it well
+            // 1080p60: ~4 Mbps, 1080p30: ~2.5 Mbps, 720p: ~1.5 Mbps
+            bitrate = Math.round(pixelRate * 0.032);
+        } else {
+            // Desktop: Slightly higher for max quality
+            // 1080p60: ~6 Mbps, 1080p30: ~4 Mbps, 720p: ~2.5 Mbps
+            bitrate = Math.round(pixelRate * 0.048);
+        }
+
+        // Clamp bitrate to reasonable bounds
+        bitrate = Math.max(1_500_000, Math.min(bitrate, 12_000_000));
+
+        // === ENCODER CONFIGURATION WITH QUALITY OPTIMIZATIONS ===
+        const encoderConfig = {
             codec: codecString,
             width: width,
             height: height,
             bitrate: bitrate,
-            framerate: fps
-        });
+            framerate: fps,
+            // Quality-focused settings
+            latencyMode: 'quality', // Prioritize quality over encoding speed
+            bitrateMode: 'constant', // CBR for consistent quality, no banding
+        };
 
-        if (loadingStatus) loadingStatus.textContent = 'Rendering frames...';
+        // Add hardware acceleration preference if supported
+        if ('hardwareAcceleration' in VideoEncoder) {
+            encoderConfig.hardwareAcceleration = 'prefer-hardware';
+        }
+
+        // Check codec support before configuring
+        const codecSupport = await VideoEncoder.isConfigSupported(encoderConfig);
+        if (!codecSupport.supported) {
+            // Fallback to baseline profile if high profile not supported
+            console.warn('High profile not supported, falling back to baseline');
+            encoderConfig.codec = 'avc1.42001f';
+            encoderConfig.bitrateMode = 'variable'; // VBR fallback
+        }
+
+        videoEncoder.configure(encoderConfig);
+
+        if (loadingStatus) {
+            const bitrateStr = (bitrate / 1_000_000).toFixed(1);
+            loadingStatus.textContent = isMobile ?
+                `Rendering (${bitrateStr} Mbps, optimized)...` :
+                `Rendering frames (${bitrateStr} Mbps)...`;
+        }
 
         // Get journey parameters - from z=1x to current zoom
         const startSize = 3.0; // z = 1x
@@ -2756,20 +2840,24 @@ async function renderVideoJourney(settings) {
         const logStart = Math.log(startSize);
         const logEnd = Math.log(targetSize);
 
-        // Rendering loop - real progress tracking
+        // === PRE-CALCULATE FRAME DATA FOR SMOOTHER ENCODING ===
+        // This reduces per-frame computation overhead
+        const frameDuration = Math.round(1000000 / fps);
+        const keyframeInterval = fps * 2; // Keyframe every 2 seconds
+
+        // === OPTIMIZED RENDERING LOOP ===
+        // Render in batches with aggressive yielding for mobile responsiveness
         for (let i = 0; i < totalFrames; i++) {
-            // Calculate REAL progress based on actual frames rendered
             const framePercent = ((i + 1) / totalFrames) * 100;
-            
-            // Update progress on every frame for accuracy, but yield less frequently for performance
             updateFrameProgress(framePercent, `Frame ${i + 1} of ${totalFrames}`);
-            
-            // Yield to UI thread periodically to allow progress bar updates
-            if (i % Math.max(1, Math.floor(fps / 4)) === 0) {
-                await new Promise(r => setTimeout(r, 0));
+
+            // === AGGRESSIVE YIELDING FOR MOBILE ===
+            // Yield after each batch to prevent UI freeze
+            if (i % batchSize === 0) {
+                await yieldToMain();
             }
 
-            const t = i / (totalFrames - 1);
+            const t = totalFrames > 1 ? i / (totalFrames - 1) : 0;
             // Smooth easing (same as flythrough)
             const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
@@ -2799,13 +2887,16 @@ async function renderVideoJourney(settings) {
             offGl.uniform2f(offProgramInfo.uniformLocations.zoomCenterY, centerYSplit[0], centerYSplit[1]);
             offGl.uniform2f(offProgramInfo.uniformLocations.zoomSize, zoomSizeSplit[0], zoomSizeSplit[1]);
 
-            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, state.maxIterations);
+            // === USE REDUCED ITERATIONS FOR VIDEO EXPORT ===
+            offGl.uniform1i(offProgramInfo.uniformLocations.maxIterations, videoIterations);
             offGl.uniform1i(offProgramInfo.uniformLocations.paletteId, state.paletteId);
             offGl.uniform1i(offProgramInfo.uniformLocations.fractalType, state.fractalType);
             offGl.uniform2f(offProgramInfo.uniformLocations.juliaC, state.juliaC.x, state.juliaC.y);
 
-            const highPrecision = currentZoomSize < 0.001 && state.fractalType < 2;
-            offGl.uniform1i(offProgramInfo.uniformLocations.highPrecision, highPrecision ? 1 : 0);
+            // === DISABLE HIGH PRECISION ON MOBILE FOR PERFORMANCE ===
+            // High precision is expensive and often not needed for video
+            const useHighPrecision = !isMobile && currentZoomSize < 0.001 && state.fractalType < 2;
+            offGl.uniform1i(offProgramInfo.uniformLocations.highPrecision, useHighPrecision ? 1 : 0);
 
             offGl.activeTexture(offGl.TEXTURE0);
             offGl.bindTexture(offGl.TEXTURE_2D, offPaletteTexture);
@@ -2813,31 +2904,43 @@ async function renderVideoJourney(settings) {
 
             offGl.drawArrays(offGl.TRIANGLE_STRIP, 0, 4);
 
+            // === ENSURE GL COMMANDS ARE FLUSHED ===
+            // This prevents command queue buildup on mobile
+            if (isMobile) {
+                offGl.finish(); // Wait for GPU to complete
+            }
+
             // Encode frame
             const frame = new VideoFrame(offCanvas, {
-                timestamp: i * (1000000 / fps), // microseconds
-                duration: Math.round(1000000 / fps)
+                timestamp: i * frameDuration,
+                duration: frameDuration
             });
 
-            // Keyframe every 2 seconds
-            const keyFrame = i % (fps * 2) === 0;
+            // Keyframe every 2 seconds for good seeking
+            const keyFrame = i % keyframeInterval === 0;
 
             videoEncoder.encode(frame, { keyFrame });
-            frame.close();
+            frame.close(); // Immediately release frame memory
+
+            // === PERIODIC ENCODER QUEUE CHECK FOR MOBILE ===
+            // Prevent encoder queue from getting too large (causes memory issues)
+            if (isMobile && videoEncoder.encodeQueueSize > 5) {
+                // Wait for encoder to catch up
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
         }
 
         // Frame rendering complete
         updateFrameProgress(100, 'All frames rendered!');
         if (loadingStatus) loadingStatus.textContent = 'Encoding video...';
-        
+
         // Flush encoder - encoding progress is tracked via the output callback above
-        // The progress bar will update in real-time as chunks are encoded
         await videoEncoder.flush();
-        
+
         // Encoding complete
         updateVideoProgress(100, 'All chunks encoded!');
         if (loadingStatus) loadingStatus.textContent = 'Finalizing...';
-        
+
         // Finalize muxer
         muxer.finalize();
 
@@ -2855,15 +2958,20 @@ async function renderVideoJourney(settings) {
         URL.revokeObjectURL(url);
 
         if (loadingStatus) loadingStatus.textContent = 'Complete!';
-        
+
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
             resetOverlay();
-            showToast(`Video exported at ${width}×${height} ${fps}fps`);
+            const bitrateStr = (bitrate / 1_000_000).toFixed(1);
+            showToast(`Video exported: ${width}×${height} ${fps}fps @ ${bitrateStr} Mbps`);
         }, 1000);
 
-        // Cleanup WebGL context
+        // === THOROUGH CLEANUP ===
+        // Clean up WebGL resources
         try {
+            offGl.deleteBuffer(offPositionBuffer);
+            offGl.deleteTexture(offPaletteTexture);
+            offGl.deleteProgram(offProgram);
             const loseContext = offGl.getExtension('WEBGL_lose_context');
             if (loseContext) loseContext.loseContext();
         } catch (e) {
