@@ -2687,8 +2687,7 @@ async function renderVideoJourney(settings) {
             antialias: false,
             depth: false,
             stencil: false,
-            powerPreference: isMobile ? 'low-power' : 'high-performance',
-            desynchronized: true // Reduces latency, helps prevent blocking
+            powerPreference: 'default' // Let browser decide, avoid GPU conflicts
         });
 
         if (!offGl) throw new Error('Failed to create offscreen WebGL context');
@@ -2904,17 +2903,38 @@ async function renderVideoJourney(settings) {
 
             offGl.drawArrays(offGl.TRIANGLE_STRIP, 0, 4);
 
-            // === ENSURE GL COMMANDS ARE FLUSHED ===
-            // This prevents command queue buildup on mobile
-            if (isMobile) {
-                offGl.finish(); // Wait for GPU to complete
-            }
+            // === CRITICAL: ENSURE GL COMMANDS ARE COMPLETE ===
+            // Must call finish() before VideoFrame reads the canvas
+            // Without this, VideoFrame may read incomplete/empty frame
+            offGl.finish();
 
-            // Encode frame
-            const frame = new VideoFrame(offCanvas, {
-                timestamp: i * frameDuration,
-                duration: frameDuration
-            });
+            // === ENCODE FRAME WITH ERROR HANDLING ===
+            let frame;
+            try {
+                frame = new VideoFrame(offCanvas, {
+                    timestamp: i * frameDuration,
+                    duration: frameDuration
+                });
+            } catch (frameError) {
+                console.error(`Failed to create VideoFrame ${i}:`, frameError);
+                // Try alternative: read pixels to ImageData first
+                const pixels = new Uint8ClampedArray(width * height * 4);
+                offGl.readPixels(0, 0, width, height, offGl.RGBA, offGl.UNSIGNED_BYTE, pixels);
+
+                // Flip Y (WebGL is bottom-up, ImageData is top-down)
+                const flipped = new Uint8ClampedArray(width * height * 4);
+                for (let y = 0; y < height; y++) {
+                    const srcRow = (height - 1 - y) * width * 4;
+                    const dstRow = y * width * 4;
+                    flipped.set(pixels.subarray(srcRow, srcRow + width * 4), dstRow);
+                }
+
+                const imageData = new ImageData(flipped, width, height);
+                frame = new VideoFrame(imageData, {
+                    timestamp: i * frameDuration,
+                    duration: frameDuration
+                });
+            }
 
             // Keyframe every 2 seconds for good seeking
             const keyFrame = i % keyframeInterval === 0;
@@ -2922,11 +2942,13 @@ async function renderVideoJourney(settings) {
             videoEncoder.encode(frame, { keyFrame });
             frame.close(); // Immediately release frame memory
 
-            // === PERIODIC ENCODER QUEUE CHECK FOR MOBILE ===
-            // Prevent encoder queue from getting too large (causes memory issues)
-            if (isMobile && videoEncoder.encodeQueueSize > 5) {
-                // Wait for encoder to catch up
-                await new Promise(resolve => setTimeout(resolve, 50));
+            // === ENCODER BACKPRESSURE FOR ALL DEVICES ===
+            // Prevent encoder queue from growing too large (causes memory exhaustion)
+            // This is critical - without it, Mac crashed after 1500 frames
+            const maxQueueSize = isMobile ? 3 : 10;
+            while (videoEncoder.encodeQueueSize > maxQueueSize) {
+                // Wait for encoder to process some frames
+                await new Promise(resolve => setTimeout(resolve, 10));
             }
         }
 
@@ -2967,25 +2989,45 @@ async function renderVideoJourney(settings) {
         }, 1000);
 
         // === THOROUGH CLEANUP ===
-        // Clean up WebGL resources
-        try {
-            offGl.deleteBuffer(offPositionBuffer);
-            offGl.deleteTexture(offPaletteTexture);
-            offGl.deleteProgram(offProgram);
-            const loseContext = offGl.getExtension('WEBGL_lose_context');
-            if (loseContext) loseContext.loseContext();
-        } catch (e) {
-            // Ignore cleanup errors
-        }
+        cleanupResources();
 
     } catch (err) {
         console.error('Video rendering error:', err);
         if (loadingStatus) loadingStatus.textContent = 'Error: ' + err.message;
+
+        // Cleanup on error to prevent memory leaks
+        cleanupResources();
+
         setTimeout(() => {
             loadingOverlay.classList.add('hidden');
             resetOverlay();
             alert('Video rendering failed: ' + err.message);
         }, 2000);
+    }
+
+    // Cleanup helper function (defined in scope with access to resources)
+    function cleanupResources() {
+        try {
+            // Close encoder if it exists
+            if (typeof videoEncoder !== 'undefined' && videoEncoder) {
+                try { videoEncoder.close(); } catch (e) { /* ignore */ }
+            }
+            // Clean up WebGL resources
+            if (typeof offGl !== 'undefined' && offGl) {
+                try { offGl.deleteBuffer(offPositionBuffer); } catch (e) { /* ignore */ }
+                try { offGl.deleteTexture(offPaletteTexture); } catch (e) { /* ignore */ }
+                try { offGl.deleteProgram(offProgram); } catch (e) { /* ignore */ }
+                const loseContext = offGl.getExtension('WEBGL_lose_context');
+                if (loseContext) loseContext.loseContext();
+            }
+            // Clear canvas reference
+            if (typeof offCanvas !== 'undefined' && offCanvas) {
+                offCanvas.width = 0;
+                offCanvas.height = 0;
+            }
+        } catch (e) {
+            console.warn('Cleanup error (ignored):', e);
+        }
     }
 }
 
