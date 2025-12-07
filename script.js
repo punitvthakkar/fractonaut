@@ -2602,10 +2602,11 @@ async function renderVideoJourney(settings) {
     const batchSize = isMobile ? 1 : (isLowPowerDevice ? 2 : 4);
     // Yield time: longer on mobile to prevent thermal throttling
     const yieldTime = isMobile ? 16 : (isLowPowerDevice ? 8 : 0);
-    // Reduced iterations for video export (maintains visual quality, reduces GPU load)
+    // Use full iterations for quality - don't cap (user chose these for a reason)
+    // Only slightly reduce on mobile to prevent overheating
     const videoIterations = isMobile ?
-        Math.min(state.maxIterations, 150) :
-        Math.min(state.maxIterations, 250);
+        Math.min(state.maxIterations, Math.max(state.maxIterations * 0.8, 200)) :
+        state.maxIterations;
 
     // Show loading overlay with dual progress bars
     const loadingOverlay = document.getElementById('exportLoadingOverlay');
@@ -2775,25 +2776,25 @@ async function renderVideoJourney(settings) {
         }
 
         // === OPTIMIZED BITRATE CALCULATION ===
-        // Target: High quality with high compression, no graining
-        // Formula based on YouTube/Netflix recommendations for H.264 High Profile
-        // Base: 4-6 Mbps for 1080p60 (vs original 18+ Mbps)
+        // Target: High quality with good compression, NO graining
+        // Fractal content has high detail - needs higher bitrate than typical video
+        // 1080p60: 12-15 Mbps, 1080p30: 8-10 Mbps, 720p: 5-6 Mbps
         const pixels = width * height;
         const pixelRate = pixels * fps;
 
         let bitrate;
         if (isMobile) {
-            // Mobile: More aggressive compression, hardware encoders handle it well
-            // 1080p60: ~4 Mbps, 1080p30: ~2.5 Mbps, 720p: ~1.5 Mbps
-            bitrate = Math.round(pixelRate * 0.032);
+            // Mobile: Still good quality but more conservative
+            // 1080p60: ~10 Mbps, 1080p30: ~6 Mbps, 720p: ~4 Mbps
+            bitrate = Math.round(pixelRate * 0.08);
         } else {
-            // Desktop: Slightly higher for max quality
-            // 1080p60: ~6 Mbps, 1080p30: ~4 Mbps, 720p: ~2.5 Mbps
-            bitrate = Math.round(pixelRate * 0.048);
+            // Desktop: High quality for detailed fractal content
+            // 1080p60: ~15 Mbps, 1080p30: ~10 Mbps, 720p: ~6 Mbps
+            bitrate = Math.round(pixelRate * 0.12);
         }
 
-        // Clamp bitrate to reasonable bounds
-        bitrate = Math.max(1_500_000, Math.min(bitrate, 12_000_000));
+        // Clamp bitrate to reasonable bounds (higher ceiling for quality)
+        bitrate = Math.max(4_000_000, Math.min(bitrate, 20_000_000));
 
         // === ENCODER CONFIGURATION WITH QUALITY OPTIMIZATIONS ===
         const encoderConfig = {
@@ -2804,7 +2805,7 @@ async function renderVideoJourney(settings) {
             framerate: fps,
             // Quality-focused settings
             latencyMode: 'quality', // Prioritize quality over encoding speed
-            bitrateMode: 'constant', // CBR for consistent quality, no banding
+            bitrateMode: 'variable', // VBR - better quality for varying complexity (fractals)
         };
 
         // Add hardware acceleration preference if supported
@@ -2818,7 +2819,6 @@ async function renderVideoJourney(settings) {
             // Fallback to baseline profile if high profile not supported
             console.warn('High profile not supported, falling back to baseline');
             encoderConfig.codec = 'avc1.42001f';
-            encoderConfig.bitrateMode = 'variable'; // VBR fallback
         }
 
         videoEncoder.configure(encoderConfig);
