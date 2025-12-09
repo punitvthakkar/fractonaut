@@ -684,7 +684,10 @@ function splitDouble(value) {
     return [hi, lo];
 }
 
-// Buffers
+// Buffers - Using VAO for efficient vertex state management
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+
 const positionBuffer = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 const positions = [
@@ -694,6 +697,12 @@ const positions = [
     1.0, -1.0,
 ];
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+// Setup vertex attribute once (stored in VAO)
+gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+
+gl.bindVertexArray(null);
 
 let lastTime = 0;
 
@@ -773,10 +782,8 @@ function drawScene(timestamp) {
 
     gl.useProgram(programInfo.program);
 
-    // Vertex setup (no change needed each frame, but kept for compatibility)
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    // Bind VAO (vertex state already configured at init)
+    gl.bindVertexArray(vao);
 
     // Set uniforms
     gl.uniform2f(programInfo.uniformLocations.resolution, gl.canvas.width, gl.canvas.height);
