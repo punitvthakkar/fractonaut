@@ -1,7 +1,7 @@
 // Service Worker for Fractonaut PWA
 // Checks for updates on every launch, uses cache when offline
 
-const CACHE_NAME = 'fractonaut-v1';
+const CACHE_NAME = 'fractonaut-v2';
 const RUNTIME_CACHE = 'fractonaut-runtime';
 const CACHE_VERSION = 'v1';
 
@@ -9,8 +9,6 @@ const CACHE_VERSION = 'v1';
 const PRECACHE_FILES = [
   './',
   './index.html',
-  './script.js',
-  './style.css',
   './manifest.json',
   './256.png',
   './512.png',
